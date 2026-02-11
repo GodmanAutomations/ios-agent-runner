@@ -143,8 +143,37 @@ def main():
         action="store_true",
         help="Capture a screenshot",
     )
+    parser.add_argument(
+        "--goal",
+        type=str,
+        help="Natural language goal — runs autonomous agent loop",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=20,
+        help="Max agent loop iterations (default: 20)",
+    )
 
     args = parser.parse_args()
+
+    # Agent mode: --goal bypasses manual flags
+    if args.goal:
+        from scripts import agent_loop
+
+        udid = boot_and_connect()
+        result = agent_loop.run(
+            goal=args.goal,
+            udid=udid,
+            bundle_id=args.bundle_id,
+            max_steps=args.max_steps,
+        )
+        status = "SUCCESS" if result["success"] else "FAILED"
+        print(f"\n{'=' * 60}", file=sys.stderr)
+        print(f"AGENT {status} in {result['steps']} steps", file=sys.stderr)
+        print(f"Summary: {result['summary']}", file=sys.stderr)
+        print(f"{'=' * 60}", file=sys.stderr)
+        sys.exit(0 if result["success"] else 1)
 
     # Must specify at least one action
     if not any([args.dump_tree, args.tap_text, args.type_text, args.screenshot]):

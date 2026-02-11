@@ -182,3 +182,46 @@ def type_text(udid: str, text: str) -> bool:
 
     _log(f"Failed to type text: {stderr.strip()}")
     return False
+
+
+def scroll(udid: str, direction: str = "down") -> bool:
+    """Swipe the screen in a direction. Tries idb, falls back to simctl."""
+    # Screen center and swipe deltas (390x844 base, adjust as needed)
+    cx, cy = 195, 422
+    delta = 300
+    swipe_map = {
+        "up":    (cx, cy + delta, cx, cy - delta),
+        "down":  (cx, cy - delta, cx, cy + delta),
+        "left":  (cx + delta, cy, cx - delta, cy),
+        "right": (cx - delta, cy, cx + delta, cy),
+    }
+    coords = swipe_map.get(direction.lower())
+    if coords is None:
+        _log(f"scroll: invalid direction '{direction}'")
+        return False
+
+    x1, y1, x2, y2 = coords
+
+    if _has_idb():
+        stdout, stderr, rc = _run([
+            _idb_cmd(), "ui", "swipe",
+            str(x1), str(y1), str(x2), str(y2),
+            "--duration", "0.5",
+        ])
+        if rc == 0:
+            _log(f"Scrolled {direction} via idb")
+            return True
+        _log(f"idb ui swipe failed: {stderr.strip()}")
+
+    # Fallback: simctl with AppleScript drag
+    script = (
+        f'tell application "Simulator" to activate\n'
+        f'delay 0.2\n'
+        f'tell application "System Events"\n'
+        f'  click at {{{x1}, {y1}}}\n'
+        f'  delay 0.1\n'
+        f'end tell'
+    )
+    stdout, stderr, rc = _run(["osascript", "-e", script])
+    _log(f"Scroll fallback attempted for {direction}")
+    return rc == 0
