@@ -8,6 +8,7 @@ Falls back to vision (screenshot) when the accessibility tree is empty.
 """
 
 import base64
+import hashlib
 import json
 import os
 import sys
@@ -31,6 +32,19 @@ Guidelines:
 - Call "done" as soon as the goal is achieved. Call "fail" if truly stuck after multiple attempts.
 - If the accessibility tree is empty, you may receive a screenshot instead — use visual cues to act.
 - Always explain your reasoning in the tool call parameters.
+- You can switch between apps using open_app with a bundle ID.
+- Use press_home to return to the home screen.
+
+Common bundle IDs:
+- com.apple.mobilesafari — Safari
+- com.apple.Preferences — Settings
+- com.apple.MobileSMS — Messages
+- com.apple.mobilenotes — Notes
+- com.apple.Maps — Maps
+- com.apple.mobilemail — Mail
+- com.apple.mobilecal — Calendar
+- com.apple.reminders — Reminders
+- com.apple.AppStore — App Store
 """
 
 TOOLS = [
@@ -100,6 +114,34 @@ TOOLS = [
                 "reasoning": {"type": "string", "description": "Why you're waiting"},
             },
             "required": ["seconds", "reasoning"],
+        },
+    },
+    {
+        "name": "open_app",
+        "description": (
+            "Switch to a different app. Common bundle IDs: "
+            "com.apple.mobilesafari (Safari), com.apple.Preferences (Settings), "
+            "com.apple.MobileSMS (Messages), com.apple.mobilenotes (Notes), "
+            "com.apple.Maps (Maps)"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "bundle_id": {"type": "string", "description": "The bundle ID of the app to open"},
+                "reasoning": {"type": "string", "description": "Why you're switching apps"},
+            },
+            "required": ["bundle_id", "reasoning"],
+        },
+    },
+    {
+        "name": "press_home",
+        "description": "Press the home button to return to the home screen / springboard.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "reasoning": {"type": "string", "description": "Why you're pressing home"},
+            },
+            "required": ["reasoning"],
         },
     },
     {
@@ -191,6 +233,47 @@ def _element_summary(elements: list[dict], limit: int = 15) -> str:
     return ", ".join(labels[:limit])
 
 
+def _tree_signature(elements: list[dict]) -> str:
+    """Hash element labels/types into a compact signature for change detection."""
+    parts = []
+    for el in elements:
+        etype = el.get("type", "")
+        label = el.get("label") or el.get("name") or el.get("title") or ""
+        parts.append(f"{etype}:{label}")
+    raw = "|".join(parts)
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _recover(udid: str, elements: list[dict], attempt: int) -> str:
+    """Attempt recovery from a stuck state. Returns a description of the action taken."""
+    if attempt == 1:
+        _log("STUCK DETECTED — attempting recovery (scroll down)")
+        idbwrap.scroll(udid, "down")
+        return "RECOVERY: scrolled down"
+    elif attempt == 2:
+        _log("STUCK DETECTED — attempting recovery (scroll up)")
+        idbwrap.scroll(udid, "up")
+        return "RECOVERY: scrolled up"
+    elif attempt == 3:
+        _log("STUCK DETECTED — attempting recovery (tap Back button)")
+        from scripts.navigator import find_element
+        el, score = find_element("Back", elements)
+        if el is not None:
+            x, y = screen_mapper.get_element_center(el)
+            idbwrap.tap(udid, x, y)
+            return f"RECOVERY: tapped Back button at ({x}, {y})"
+        # No Back button found — try common nav labels
+        for label in ("Close", "Cancel", "Done", "Home"):
+            el, score = find_element(label, elements)
+            if el is not None and score > 60:
+                x, y = screen_mapper.get_element_center(el)
+                idbwrap.tap(udid, x, y)
+                return f"RECOVERY: tapped '{label}' at ({x}, {y})"
+        return "RECOVERY: no navigation button found"
+    else:
+        return "RECOVERY: all attempts exhausted"
+
+
 def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step: int) -> str:
     """Execute a tool call and return a result string."""
     if name == "tap":
@@ -228,6 +311,19 @@ def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step
         seconds = min(max(params.get("seconds", 2), 1), 5)
         time.sleep(seconds)
         return f"WAITED {seconds}s"
+
+    elif name == "open_app":
+        bid = params.get("bundle_id", "")
+        if not bid:
+            return "ERROR: open_app requires 'bundle_id' param"
+        idbwrap.launch_app(udid, bid)
+        time.sleep(2)
+        return f"OPENED {bid}"
+
+    elif name == "press_home":
+        idbwrap.press_home(udid)
+        time.sleep(1)
+        return "PRESSED HOME — now on springboard"
 
     elif name == "done":
         return f"DONE: {params.get('summary', 'Goal achieved')}"
@@ -283,6 +379,9 @@ def run(
     ]
 
     step_history = []
+    recent_trees: list[str] = []
+    consecutive_failures: int = 0
+    recovery_attempt: int = 0
 
     for step in range(1, max_steps + 1):
         _log(f"--- Step {step}/{max_steps} ---")
@@ -327,6 +426,12 @@ def run(
         result = _execute_tool(tool_name, tool_params, udid, elements, step)
         _log(f"Result: {result}")
 
+        # Track tap failures for stuck detection
+        if "TAP FAILED" in result:
+            consecutive_failures += 1
+        else:
+            consecutive_failures = 0
+
         # Record step
         step_history.append({
             "step": step,
@@ -363,6 +468,54 @@ def run(
         time.sleep(1)
         elements, tree_json = _dump_tree(udid)
         _log(f"Refreshed tree: {len(elements)} elements")
+
+        # --- Stuck detection ---
+        sig = _tree_signature(elements)
+        recent_trees.append(sig)
+        if len(recent_trees) > 3:
+            recent_trees.pop(0)
+
+        tree_stuck = (
+            len(recent_trees) == 3
+            and recent_trees[0] == recent_trees[1] == recent_trees[2]
+        )
+        failure_stuck = consecutive_failures >= 3
+
+        if tree_stuck or failure_stuck:
+            reason = "identical tree 3 turns" if tree_stuck else f"{consecutive_failures} consecutive tap failures"
+            recovery_attempt += 1
+
+            if recovery_attempt <= 3:
+                recovery_result = _recover(udid, elements, recovery_attempt)
+                _log(f"Recovery ({reason}): {recovery_result}")
+                step_history.append({
+                    "step": step,
+                    "tool": "_recover",
+                    "params": {"attempt": recovery_attempt, "reason": reason},
+                    "result": recovery_result,
+                })
+                # Re-refresh the tree after recovery action
+                time.sleep(1)
+                elements, tree_json = _dump_tree(udid)
+                recent_trees.clear()
+                consecutive_failures = 0
+            else:
+                _log(f"All recovery attempts exhausted ({reason}) — auto-failing")
+                step_history.append({
+                    "step": step,
+                    "tool": "fail",
+                    "params": {"reason": f"Stuck: {reason}, recovery exhausted"},
+                    "result": "FAIL: agent stuck, all recovery attempts exhausted",
+                })
+                return {
+                    "success": False,
+                    "steps": step,
+                    "summary": f"Stuck: {reason}, all recovery attempts exhausted",
+                    "history": step_history,
+                }
+        else:
+            # Reset recovery counter when the agent makes progress
+            recovery_attempt = 0
 
         # Build tool_result and next observation
         observation_text = f"Result: {result}\n\nUpdated accessibility tree:\n{tree_json}"

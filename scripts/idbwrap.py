@@ -184,6 +184,12 @@ def type_text(udid: str, text: str) -> bool:
     return False
 
 
+def press_home(udid: str) -> bool:
+    """Press the home button to return to the springboard."""
+    stdout, stderr, rc = _run(["xcrun", "simctl", "home", udid])
+    return rc == 0
+
+
 def scroll(udid: str, direction: str = "down") -> bool:
     """Swipe the screen in a direction. Tries idb, falls back to simctl."""
     # Screen center and swipe deltas (390x844 base, adjust as needed)
