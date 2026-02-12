@@ -28,23 +28,27 @@ Your job: accomplish the user's goal by calling exactly one tool per turn.
 
 Guidelines:
 - Use "tap" with the visible label text — fuzzy matching is handled for you.
+- After typing a URL or search query, use press_key with RETURN to submit it.
 - After typing, the keyboard may cover the screen; scroll or tap elsewhere if needed.
 - Call "done" as soon as the goal is achieved. Call "fail" if truly stuck after multiple attempts.
 - If the accessibility tree is empty, you may receive a screenshot instead — use visual cues to act.
+- If you can see a button in the screenshot but it has no accessibility label, use tap_xy with coordinates.
 - Always explain your reasoning in the tool call parameters.
 - You can switch between apps using open_app with a bundle ID.
 - Use press_home to return to the home screen.
 
-Common bundle IDs:
+Common bundle IDs (simulator):
 - com.apple.mobilesafari — Safari
 - com.apple.Preferences — Settings
 - com.apple.MobileSMS — Messages
-- com.apple.mobilenotes — Notes
 - com.apple.Maps — Maps
-- com.apple.mobilemail — Mail
 - com.apple.mobilecal — Calendar
 - com.apple.reminders — Reminders
-- com.apple.AppStore — App Store
+- com.apple.MobileAddressBook — Contacts
+- com.apple.mobileslideshow — Photos
+- com.apple.DocumentsApp — Files
+- com.apple.Health — Health
+Note: Not all apps are available on every simulator. If open_app fails, the app is not installed.
 """
 
 TOOLS = [
@@ -119,10 +123,11 @@ TOOLS = [
     {
         "name": "open_app",
         "description": (
-            "Switch to a different app. Common bundle IDs: "
+            "Switch to a different app by bundle ID. If the app is not installed, "
+            "the result will say OPEN FAILED. Common IDs: "
             "com.apple.mobilesafari (Safari), com.apple.Preferences (Settings), "
-            "com.apple.MobileSMS (Messages), com.apple.mobilenotes (Notes), "
-            "com.apple.Maps (Maps)"
+            "com.apple.Maps (Maps), com.apple.reminders (Reminders), "
+            "com.apple.mobilecal (Calendar), com.apple.DocumentsApp (Files)"
         ),
         "input_schema": {
             "type": "object",
@@ -142,6 +147,42 @@ TOOLS = [
                 "reasoning": {"type": "string", "description": "Why you're pressing home"},
             },
             "required": ["reasoning"],
+        },
+    },
+    {
+        "name": "press_key",
+        "description": (
+            "Press a special key. Use RETURN to submit search/text, DELETE to backspace, "
+            "TAB to move between fields, ESCAPE to dismiss."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "enum": ["RETURN", "DELETE", "TAB", "ESCAPE"],
+                    "description": "The key to press",
+                },
+                "reasoning": {"type": "string", "description": "Why you're pressing this key"},
+            },
+            "required": ["key", "reasoning"],
+        },
+    },
+    {
+        "name": "tap_xy",
+        "description": (
+            "Tap at exact screen coordinates. Use this when you can see a button "
+            "in the screenshot but it has no accessibility label. The screen is "
+            "approximately 390x844 points (iPhone Pro). Bottom-right corner = ~(360, 810)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer", "description": "X coordinate (0-390)"},
+                "y": {"type": "integer", "description": "Y coordinate (0-844)"},
+                "reasoning": {"type": "string", "description": "What you see at these coordinates"},
+            },
+            "required": ["x", "y", "reasoning"],
         },
     },
     {
@@ -312,11 +353,24 @@ def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step
         time.sleep(seconds)
         return f"WAITED {seconds}s"
 
+    elif name == "press_key":
+        key = params.get("key", "RETURN")
+        success = idbwrap.key_press(udid, key)
+        return f"PRESSED {key}" if success else f"KEY PRESS FAILED: {key}"
+
+    elif name == "tap_xy":
+        x = params.get("x", 0)
+        y = params.get("y", 0)
+        idbwrap.tap(udid, x, y)
+        return f"TAPPED coordinates ({x}, {y})"
+
     elif name == "open_app":
         bid = params.get("bundle_id", "")
         if not bid:
             return "ERROR: open_app requires 'bundle_id' param"
-        idbwrap.launch_app(udid, bid)
+        success = idbwrap.launch_app(udid, bid)
+        if not success:
+            return f"OPEN FAILED: Could not launch '{bid}' — app may not be installed"
         time.sleep(2)
         return f"OPENED {bid}"
 

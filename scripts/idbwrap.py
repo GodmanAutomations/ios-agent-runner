@@ -184,10 +184,66 @@ def type_text(udid: str, text: str) -> bool:
     return False
 
 
+def key_press(udid: str, key: str) -> bool:
+    """Send a key event. Supports: RETURN, DELETE, HOME, LOCK, SIRI, SCREENSHOT."""
+    if _has_idb():
+        # idb ui key-sequence sends HID key events
+        stdout, stderr, rc = _run([_idb_cmd(), "ui", "key-sequence", key])
+        if rc == 0:
+            _log(f"Key press '{key}' via idb")
+            return True
+        # Fallback: try idb ui button for hardware keys
+        stdout, stderr, rc = _run([_idb_cmd(), "ui", "button", key])
+        if rc == 0:
+            _log(f"Button press '{key}' via idb")
+            return True
+        _log(f"idb key/button '{key}' failed: {stderr.strip()}")
+
+    # Fallback: AppleScript for common keys
+    key_map = {
+        "RETURN": 'keystroke return',
+        "DELETE": 'key code 51',  # backspace
+        "TAB": 'keystroke tab',
+        "ESCAPE": 'key code 53',
+    }
+    as_cmd = key_map.get(key.upper())
+    if as_cmd:
+        script = (
+            'tell application "Simulator" to activate\n'
+            'delay 0.2\n'
+            f'tell application "System Events" to {as_cmd}'
+        )
+        stdout, stderr, rc = _run(["osascript", "-e", script])
+        if rc == 0:
+            _log(f"Key press '{key}' via AppleScript")
+            return True
+
+    _log(f"Failed to press key '{key}'")
+    return False
+
+
 def press_home(udid: str) -> bool:
     """Press the home button to return to the springboard."""
-    stdout, stderr, rc = _run(["xcrun", "simctl", "home", udid])
-    return rc == 0
+    if _has_idb():
+        stdout, stderr, rc = _run([_idb_cmd(), "ui", "button", "HOME"])
+        if rc == 0:
+            _log("Pressed HOME via idb")
+            return True
+        _log(f"idb ui button HOME failed: {stderr.strip()}")
+
+    # Fallback: AppleScript Cmd+Shift+H (Simulator shortcut for home)
+    script = (
+        'tell application "Simulator" to activate\n'
+        'delay 0.2\n'
+        'tell application "System Events" to keystroke "h" using {command down, shift down}'
+    )
+    stdout, stderr, rc = _run(["osascript", "-e", script])
+    if rc == 0:
+        _log("Pressed HOME via AppleScript fallback")
+        return True
+
+    _log(f"Failed to press HOME: {stderr.strip()}")
+    return False
 
 
 def scroll(udid: str, direction: str = "down") -> bool:
