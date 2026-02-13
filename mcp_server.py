@@ -33,8 +33,10 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
 load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
+load_dotenv(os.path.expanduser("~/.env"))  # OpenAI key lives here
 
-from scripts import agent_loop, idbwrap, screen_mapper, screenshot, simctl
+from scripts import agent_loop, idbwrap, intel, screen_mapper, screenshot, simctl
+from scripts import photo_sweep, vision_extract, local_ocr
 
 # ---------------------------------------------------------------------------
 # Lazy simulator connection
@@ -150,6 +152,214 @@ def ios_dump_tree(bundle_id: str = "com.apple.mobilesafari") -> str:
         compact.append(entry)
 
     return json.dumps(compact, indent=2)
+
+
+@mcp.tool()
+def ios_search_findings(query: str = "", category: str = "") -> str:
+    """Search all iOS runner discoveries by keyword or category.
+
+    Categories: network_config, device_settings, credentials, av_config,
+    app_ui, photo_gallery, text_content
+
+    Returns all matching findings (no limit).
+    """
+    results = intel.search_findings(query=query or None, category=category or None)
+    return json.dumps(results, indent=2)
+
+
+@mcp.tool()
+def ios_recent_findings(count: int = 20) -> str:
+    """Get the most recent iOS runner discoveries.
+
+    Returns the last N findings with full details.
+    """
+    all_findings = intel.load_all_findings()
+    recent = all_findings[-count:] if count < len(all_findings) else all_findings
+    return json.dumps(recent, indent=2)
+
+
+@mcp.tool()
+def ios_sweep_photos(count: int = 50) -> str:
+    """Sweep through Photos app, screenshotting each photo.
+
+    Opens Photos, navigates to Recently Saved, taps the first photo,
+    then swipes left and screenshots N times. No AI, no API calls.
+
+    Args:
+        count: Number of photos to capture (default: 50).
+
+    Returns:
+        JSON with list of screenshot paths captured.
+    """
+    paths = photo_sweep.sweep(count=count)
+    return json.dumps({"captured": len(paths), "paths": paths}, indent=2)
+
+
+@mcp.tool()
+def ios_extract_photos(pattern: str = "screenshot_sweep_*_photo_*.png", limit: int = 0) -> str:
+    """OCR all sweep screenshots via OpenAI vision and save findings to intel store.
+
+    Reads PNGs from _artifacts/, sends each to gpt-4o-mini for text extraction,
+    then feeds results through the intel pipeline. Free on OpenAI plan.
+
+    Args:
+        pattern: Glob pattern for sweep PNGs (default: all sweep photos).
+        limit: Max images to process (0 = all).
+
+    Returns:
+        JSON summary of extraction results.
+    """
+    import glob as globmod
+
+    artifacts_dir = os.path.join(_PROJECT_ROOT, "_artifacts")
+    full_pattern = os.path.join(artifacts_dir, pattern)
+    images = sorted(globmod.glob(full_pattern))
+
+    if not images:
+        return json.dumps({"error": f"No images found matching: {full_pattern}"})
+
+    if limit > 0:
+        images = images[:limit]
+
+    results = vision_extract.process_batch(images, delay=0.3)
+
+    ok = sum(1 for r in results if r.get("status") == "ok")
+    failed = sum(1 for r in results if r.get("status") == "failed")
+    empty = sum(1 for r in results if r.get("status") == "empty")
+
+    return json.dumps({
+        "processed": len(results),
+        "extracted": ok,
+        "failed": failed,
+        "empty": empty,
+        "results": results,
+    }, indent=2)
+
+
+@mcp.tool()
+def ios_sweep_and_extract(count: int = 50) -> str:
+    """Full pipeline: sweep Photos app then OCR everything. One command does it all.
+
+    1. Opens Photos, swipes through N photos capturing screenshots
+    2. Sends all captures through OpenAI vision for text extraction
+    3. Feeds extracted text into intel pipeline for classification + persistence
+
+    All findings saved to ~/.ulan/ios_intel.json and memory file.
+    Uses OpenAI (free) for vision, no Anthropic API calls.
+
+    Args:
+        count: Number of photos to sweep (default: 50).
+
+    Returns:
+        JSON summary with sweep + extraction results.
+    """
+    # Step 1: Sweep
+    paths = photo_sweep.sweep(count=count)
+    if not paths:
+        return json.dumps({"error": "Sweep captured no photos"})
+
+    # Step 2: Extract
+    results = vision_extract.process_batch(paths, delay=0.3)
+
+    ok = sum(1 for r in results if r.get("status") == "ok")
+    failed = sum(1 for r in results if r.get("status") == "failed")
+
+    return json.dumps({
+        "sweep_count": len(paths),
+        "extracted": ok,
+        "failed": failed,
+        "total_findings": len(intel.load_all_findings()),
+        "results": results,
+    }, indent=2)
+
+
+@mcp.tool()
+def ios_local_ocr(pattern: str = "screenshot_sweep_*_photo_*.png") -> str:
+    """OCR all sweep screenshots using local macOS Vision framework. No API calls, instant.
+
+    Runs Apple's on-device text recognition (~0.3s/image). Processes only
+    unprocessed photos (skips anything already in the intel store).
+
+    Args:
+        pattern: Glob pattern for PNGs in _artifacts/ (default: all sweep photos).
+
+    Returns:
+        JSON summary of extraction results.
+    """
+    import glob as globmod
+
+    artifacts_dir = os.path.join(_PROJECT_ROOT, "_artifacts")
+    full_pattern = os.path.join(artifacts_dir, pattern)
+    images = sorted(globmod.glob(full_pattern))
+
+    if not images:
+        return json.dumps({"error": f"No images found matching: {full_pattern}"})
+
+    # Skip already-processed
+    existing = intel.load_all_findings()
+    processed = {os.path.abspath(f.get("screenshot_path", "")) for f in existing if f.get("screenshot_path")}
+    images = [p for p in images if os.path.abspath(p) not in processed]
+
+    if not images:
+        return json.dumps({"message": "All images already processed", "total_findings": len(existing)})
+
+    import time
+    start = time.time()
+    results = local_ocr.process_batch(images)
+    elapsed = time.time() - start
+
+    ok = sum(1 for r in results if r.get("status") == "ok")
+    empty = sum(1 for r in results if r.get("status") == "empty")
+
+    return json.dumps({
+        "processed": len(results),
+        "extracted": ok,
+        "empty": empty,
+        "elapsed_seconds": round(elapsed, 1),
+        "per_image_seconds": round(elapsed / max(len(results), 1), 2),
+        "total_findings": len(intel.load_all_findings()),
+    }, indent=2)
+
+
+@mcp.tool()
+def ios_sweep_and_ocr(count: int = 50) -> str:
+    """Full pipeline: sweep Photos app then LOCAL OCR. One command, zero API calls.
+
+    1. Opens Photos, swipes through N photos capturing screenshots
+    2. Runs macOS Vision OCR locally (~0.3s/image, no network)
+    3. Feeds extracted text into intel pipeline for classification + persistence
+
+    All findings saved to ~/.ulan/ios_intel.json and memory file.
+
+    Args:
+        count: Number of photos to sweep (default: 50).
+
+    Returns:
+        JSON summary with sweep + OCR results.
+    """
+    import time
+
+    # Step 1: Sweep
+    paths = photo_sweep.sweep(count=count)
+    if not paths:
+        return json.dumps({"error": "Sweep captured no photos"})
+
+    # Step 2: Local OCR
+    start = time.time()
+    results = local_ocr.process_batch(paths)
+    elapsed = time.time() - start
+
+    ok = sum(1 for r in results if r.get("status") == "ok")
+    empty = sum(1 for r in results if r.get("status") == "empty")
+
+    return json.dumps({
+        "sweep_count": len(paths),
+        "extracted": ok,
+        "empty": empty,
+        "ocr_seconds": round(elapsed, 1),
+        "total_findings": len(intel.load_all_findings()),
+        "results": results,
+    }, indent=2)
 
 
 if __name__ == "__main__":

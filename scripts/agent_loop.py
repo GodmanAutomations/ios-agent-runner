@@ -16,7 +16,9 @@ import time
 
 import anthropic
 
-from scripts import idbwrap, screen_mapper, screenshot
+from dataclasses import asdict
+
+from scripts import idbwrap, intel, screen_mapper, screenshot
 
 MODEL = "claude-sonnet-4-5-20250929"
 
@@ -36,6 +38,8 @@ Guidelines:
 - Always explain your reasoning in the tool call parameters.
 - You can switch between apps using open_app with a bundle ID.
 - Use press_home to return to the home screen.
+- CRITICAL: When you read text from the screen and need to reproduce it (e.g. copying a message into another app), you MUST type the EXACT text, character for character. Never paraphrase, summarize, or invent different words. If unsure, take a screenshot first and read carefully.
+- In Messages, the text input field ("iMessage") is at the very bottom of the screen. If tapping by label fails, use tap_xy at coordinates near the bottom center.
 
 Common bundle IDs (simulator):
 - com.apple.mobilesafari — Safari
@@ -51,164 +55,187 @@ Common bundle IDs (simulator):
 Note: Not all apps are available on every simulator. If open_app fails, the app is not installed.
 """
 
-TOOLS = [
-    {
-        "name": "tap",
-        "description": "Tap a UI element by its visible label text. Fuzzy matching is applied.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "text": {"type": "string", "description": "The label/name of the element to tap"},
-                "reasoning": {"type": "string", "description": "Why you're tapping this element"},
-            },
-            "required": ["text", "reasoning"],
-        },
-    },
-    {
-        "name": "type_text",
-        "description": "Type text into the currently focused input field. Use \\n for enter/return.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "text": {"type": "string", "description": "The text to type"},
-                "reasoning": {"type": "string", "description": "Why you're typing this"},
-            },
-            "required": ["text", "reasoning"],
-        },
-    },
-    {
-        "name": "scroll",
-        "description": "Swipe/scroll the screen in a direction.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "direction": {
-                    "type": "string",
-                    "enum": ["up", "down", "left", "right"],
-                    "description": "Direction to scroll",
+def _build_tools(config=None) -> list[dict]:
+    """Build the tool definitions, interpolating actual screen dimensions."""
+    if config is not None:
+        w, h = config.width, config.height
+        br_x, br_y = w - 30, h - 34
+    else:
+        w, h = 390, 844
+        br_x, br_y = 360, 810
+
+    return [
+        {
+            "name": "tap",
+            "description": "Tap a UI element by its visible label text. Fuzzy matching is applied.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The label/name of the element to tap"},
+                    "reasoning": {"type": "string", "description": "Why you're tapping this element"},
                 },
-                "reasoning": {"type": "string", "description": "Why you're scrolling"},
+                "required": ["text", "reasoning"],
             },
-            "required": ["direction", "reasoning"],
         },
-    },
-    {
-        "name": "take_screenshot",
-        "description": "Capture the current screen for the user's audit trail.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "reasoning": {"type": "string", "description": "Why you're capturing this"},
-            },
-            "required": ["reasoning"],
-        },
-    },
-    {
-        "name": "wait",
-        "description": "Pause to let the UI settle (e.g. after navigation or loading).",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "seconds": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 5,
-                    "description": "How long to wait",
+        {
+            "name": "type_text",
+            "description": "Type text into the currently focused input field. Use \\n for enter/return.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The text to type"},
+                    "reasoning": {"type": "string", "description": "Why you're typing this"},
                 },
-                "reasoning": {"type": "string", "description": "Why you're waiting"},
+                "required": ["text", "reasoning"],
             },
-            "required": ["seconds", "reasoning"],
         },
-    },
-    {
-        "name": "open_app",
-        "description": (
-            "Switch to a different app by bundle ID. If the app is not installed, "
-            "the result will say OPEN FAILED. Common IDs: "
-            "com.apple.mobilesafari (Safari), com.apple.Preferences (Settings), "
-            "com.apple.Maps (Maps), com.apple.reminders (Reminders), "
-            "com.apple.mobilecal (Calendar), com.apple.DocumentsApp (Files)"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "bundle_id": {"type": "string", "description": "The bundle ID of the app to open"},
-                "reasoning": {"type": "string", "description": "Why you're switching apps"},
-            },
-            "required": ["bundle_id", "reasoning"],
-        },
-    },
-    {
-        "name": "press_home",
-        "description": "Press the home button to return to the home screen / springboard.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "reasoning": {"type": "string", "description": "Why you're pressing home"},
-            },
-            "required": ["reasoning"],
-        },
-    },
-    {
-        "name": "press_key",
-        "description": (
-            "Press a special key. Use RETURN to submit search/text, DELETE to backspace, "
-            "TAB to move between fields, ESCAPE to dismiss."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "key": {
-                    "type": "string",
-                    "enum": ["RETURN", "DELETE", "TAB", "ESCAPE"],
-                    "description": "The key to press",
+        {
+            "name": "scroll",
+            "description": "Swipe/scroll the screen in a direction.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "direction": {
+                        "type": "string",
+                        "enum": ["up", "down", "left", "right"],
+                        "description": "Direction to scroll",
+                    },
+                    "reasoning": {"type": "string", "description": "Why you're scrolling"},
                 },
-                "reasoning": {"type": "string", "description": "Why you're pressing this key"},
+                "required": ["direction", "reasoning"],
             },
-            "required": ["key", "reasoning"],
         },
-    },
-    {
-        "name": "tap_xy",
-        "description": (
-            "Tap at exact screen coordinates. Use this when you can see a button "
-            "in the screenshot but it has no accessibility label. The screen is "
-            "approximately 390x844 points (iPhone Pro). Bottom-right corner = ~(360, 810)."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "x": {"type": "integer", "description": "X coordinate (0-390)"},
-                "y": {"type": "integer", "description": "Y coordinate (0-844)"},
-                "reasoning": {"type": "string", "description": "What you see at these coordinates"},
+        {
+            "name": "take_screenshot",
+            "description": "Capture the current screen for the user's audit trail.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "reasoning": {"type": "string", "description": "Why you're capturing this"},
+                },
+                "required": ["reasoning"],
             },
-            "required": ["x", "y", "reasoning"],
         },
-    },
-    {
-        "name": "done",
-        "description": "Signal that the goal has been achieved. Call this when finished.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "summary": {"type": "string", "description": "What was accomplished"},
-                "reasoning": {"type": "string", "description": "How you know the goal is met"},
+        {
+            "name": "wait",
+            "description": "Pause to let the UI settle (e.g. after navigation or loading).",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "seconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5,
+                        "description": "How long to wait",
+                    },
+                    "reasoning": {"type": "string", "description": "Why you're waiting"},
+                },
+                "required": ["seconds", "reasoning"],
             },
-            "required": ["summary", "reasoning"],
         },
-    },
-    {
-        "name": "fail",
-        "description": "Signal that the goal cannot be achieved. Only call after multiple attempts.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "reason": {"type": "string", "description": "Why the goal cannot be achieved"},
+        {
+            "name": "open_app",
+            "description": (
+                "Switch to a different app by bundle ID. If the app is not installed, "
+                "the result will say OPEN FAILED. Common IDs: "
+                "com.apple.mobilesafari (Safari), com.apple.Preferences (Settings), "
+                "com.apple.Maps (Maps), com.apple.reminders (Reminders), "
+                "com.apple.mobilecal (Calendar), com.apple.DocumentsApp (Files)"
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "bundle_id": {"type": "string", "description": "The bundle ID of the app to open"},
+                    "reasoning": {"type": "string", "description": "Why you're switching apps"},
+                },
+                "required": ["bundle_id", "reasoning"],
             },
-            "required": ["reason"],
         },
-    },
-]
+        {
+            "name": "press_home",
+            "description": "Press the home button to return to the home screen / springboard.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "reasoning": {"type": "string", "description": "Why you're pressing home"},
+                },
+                "required": ["reasoning"],
+            },
+        },
+        {
+            "name": "press_key",
+            "description": (
+                "Press a special key. Use RETURN to submit search/text, DELETE to backspace, "
+                "TAB to move between fields, ESCAPE to dismiss."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "enum": ["RETURN", "DELETE", "TAB", "ESCAPE"],
+                        "description": "The key to press",
+                    },
+                    "reasoning": {"type": "string", "description": "Why you're pressing this key"},
+                },
+                "required": ["key", "reasoning"],
+            },
+        },
+        {
+            "name": "tap_xy",
+            "description": (
+                f"Tap at exact screen coordinates in POINTS (not pixels). "
+                f"WARNING: The screenshot image is scaled — do NOT use pixel coordinates from the image. "
+                f"The actual screen is {w}x{h} points. x must be 0-{w}, y must be 0-{h}. "
+                f"Top-left=(0,0), bottom-right=~({br_x},{br_y}). "
+                f"If using the accessibility tree, read the 'frame' values directly — those are already in points."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer", "description": f"X in points (0-{w}). NOT image pixels."},
+                    "y": {"type": "integer", "description": f"Y in points (0-{h}). NOT image pixels."},
+                    "reasoning": {"type": "string", "description": "What you see at these coordinates"},
+                },
+                "required": ["x", "y", "reasoning"],
+            },
+        },
+        {
+            "name": "done",
+            "description": "Signal that the goal has been achieved. Call this when finished.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "description": "What was accomplished"},
+                    "reasoning": {"type": "string", "description": "How you know the goal is met"},
+                },
+                "required": ["summary", "reasoning"],
+            },
+        },
+        {
+            "name": "fail",
+            "description": "Signal that the goal cannot be achieved. Only call after multiple attempts.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "reason": {"type": "string", "description": "Why the goal cannot be achieved"},
+                },
+                "required": ["reason"],
+            },
+        },
+        {
+            "name": "extract_info",
+            "description": "Extract and save all visible information from the current screen. Use when you see useful data (IPs, configs, settings, etc.).",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "notes": {"type": "string", "description": "What you see that's worth capturing"},
+                    "reasoning": {"type": "string", "description": "Why this is valuable"},
+                },
+                "required": ["notes", "reasoning"],
+            },
+        },
+    ]
 
 
 def _log(msg: str) -> None:
@@ -236,13 +263,32 @@ def _dump_tree(udid: str) -> tuple[list[dict], str]:
     return elements, json.dumps(compact, indent=1)
 
 
-def _screenshot_b64(udid: str, label: str) -> str | None:
-    """Capture screenshot and return base64-encoded PNG, or None."""
+def _screenshot_b64(udid: str, label: str, max_dim: int = 1600) -> str | None:
+    """Capture screenshot, resize to fit max_dim, return base64 PNG.
+
+    Anthropic's API limits images to 2000px per side in many-image requests.
+    We resize to max_dim (default 1600) to stay safely under that limit.
+    """
     path = screenshot.capture_with_label(udid, label)
     if not path or not os.path.exists(path):
         return None
-    with open(path, "rb") as f:
-        return base64.standard_b64encode(f.read()).decode("ascii")
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(path)
+        w, h = img.size
+        if max(w, h) > max_dim:
+            scale = max_dim / max(w, h)
+            new_w, new_h = int(w * scale), int(h * scale)
+            img = img.resize((new_w, new_h), Image.LANCZOS)
+            _log(f"Resized screenshot {w}x{h} → {new_w}x{new_h}")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return base64.standard_b64encode(buf.getvalue()).decode("ascii")
+    except ImportError:
+        # Pillow not available, send raw (may fail on many-image requests)
+        with open(path, "rb") as f:
+            return base64.standard_b64encode(f.read()).decode("ascii")
 
 
 def _build_user_content(
@@ -251,9 +297,11 @@ def _build_user_content(
     """Build a user message content array — text + optional screenshot if tree is sparse."""
     parts: list[dict] = [{"type": "text", "text": text}]
 
-    # If tree has fewer than 3 meaningful elements, add a screenshot for vision
+    # If tree has fewer than 8 meaningful elements, add a screenshot for vision.
+    # Messages conversations typically have 6-7 elements with sparse labels,
+    # so we need a generous threshold to ensure vision is used.
     meaningful = [e for e in elements if e.get("label") or e.get("name") or e.get("title")]
-    if len(meaningful) < 3:
+    if len(meaningful) < 8:
         _log(f"Sparse tree ({len(meaningful)} labeled elements) — adding screenshot for vision")
         b64 = _screenshot_b64(udid, label)
         if b64:
@@ -285,15 +333,15 @@ def _tree_signature(elements: list[dict]) -> str:
     return hashlib.md5(raw.encode()).hexdigest()
 
 
-def _recover(udid: str, elements: list[dict], attempt: int) -> str:
+def _recover(udid: str, elements: list[dict], attempt: int, config=None) -> str:
     """Attempt recovery from a stuck state. Returns a description of the action taken."""
     if attempt == 1:
         _log("STUCK DETECTED — attempting recovery (scroll down)")
-        idbwrap.scroll(udid, "down")
+        idbwrap.scroll(udid, "down", config=config)
         return "RECOVERY: scrolled down"
     elif attempt == 2:
         _log("STUCK DETECTED — attempting recovery (scroll up)")
-        idbwrap.scroll(udid, "up")
+        idbwrap.scroll(udid, "up", config=config)
         return "RECOVERY: scrolled up"
     elif attempt == 3:
         _log("STUCK DETECTED — attempting recovery (tap Back button)")
@@ -315,7 +363,7 @@ def _recover(udid: str, elements: list[dict], attempt: int) -> str:
         return "RECOVERY: all attempts exhausted"
 
 
-def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step: int) -> str:
+def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step: int, config=None, bundle_id: str = "", goal: str = "") -> str:
     """Execute a tool call and return a result string."""
     if name == "tap":
         target_text = params.get("text", "")
@@ -341,7 +389,7 @@ def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step
 
     elif name == "scroll":
         direction = params.get("direction", "down")
-        idbwrap.scroll(udid, direction)
+        idbwrap.scroll(udid, direction, config=config)
         return f"SCROLLED {direction}"
 
     elif name == "take_screenshot":
@@ -361,6 +409,14 @@ def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step
     elif name == "tap_xy":
         x = params.get("x", 0)
         y = params.get("y", 0)
+        # Catch out-of-bounds coordinates (likely using pixel coords instead of points)
+        if config and (x > config.width or y > config.height):
+            return (
+                f"ERROR: coordinates ({x}, {y}) are outside the screen "
+                f"({config.width}x{config.height} points). "
+                f"You are likely using image pixel coordinates instead of screen points. "
+                f"The screen is only {config.width}x{config.height}."
+            )
         idbwrap.tap(udid, x, y)
         return f"TAPPED coordinates ({x}, {y})"
 
@@ -379,6 +435,17 @@ def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step
         time.sleep(1)
         return "PRESSED HOME — now on springboard"
 
+    elif name == "extract_info":
+        # Force a fresh capture + full extraction
+        path = screenshot.capture_with_label(udid, f"step_{step:02d}_extract")
+        tree_path = screenshot.save_tree_json(elements, f"step_{step:02d}_extract")
+        finding = intel.build_finding(elements, bundle_id, path or "", tree_path or "", step, goal)
+        finding.tags.append("agent_flagged")
+        if params.get("notes"):
+            finding.tags.append(f"note:{params['notes'][:100]}")
+        fid = intel.save_finding(finding)
+        return f"EXTRACTED: {len(finding.text_content)} texts, {len(finding.extracted_data)} structured items. ID: {fid}"
+
     elif name == "done":
         return f"DONE: {params.get('summary', 'Goal achieved')}"
 
@@ -394,6 +461,7 @@ def run(
     udid: str,
     bundle_id: str = "com.apple.mobilesafari",
     max_steps: int = 20,
+    config=None,
 ) -> dict:
     """Run the autonomous agent loop.
 
@@ -403,10 +471,15 @@ def run(
         summary: str
         history: list of step dicts
     """
+    if config is None:
+        from scripts.device_config import detect
+        config = detect(udid)
+
     client = anthropic.Anthropic()
 
     _log(f"Goal: {goal}")
     _log(f"Bundle: {bundle_id} | Max steps: {max_steps}")
+    _log(f"Screen: {config.width}x{config.height} @{config.scale}x")
 
     # Launch the app
     idbwrap.launch_app(udid, bundle_id)
@@ -417,7 +490,22 @@ def run(
     _log(f"Initial tree: {len(elements)} elements")
 
     # Initial screenshot for audit trail
-    screenshot.capture_with_label(udid, "step_00_initial")
+    initial_ss = screenshot.capture_with_label(udid, "step_00_initial")
+
+    # --- Intel: capture initial screen ---
+    all_findings: list[intel.Finding] = []
+    initial_tree_json_path = screenshot.save_tree_json(elements, "step_00_initial")
+    initial_finding = intel.build_finding(
+        elements=elements,
+        bundle_id=bundle_id,
+        screenshot_path=initial_ss or "",
+        tree_path=initial_tree_json_path or "",
+        step=0,
+        goal=goal,
+    )
+    if initial_finding.text_content:
+        intel.save_finding(initial_finding)
+        all_findings.append(initial_finding)
 
     # Build first user message (with vision fallback if tree is sparse)
     first_text = (
@@ -432,6 +520,8 @@ def run(
         }
     ]
 
+    tools = _build_tools(config)
+
     step_history = []
     recent_trees: list[str] = []
     consecutive_failures: int = 0
@@ -445,7 +535,7 @@ def run(
             model=MODEL,
             max_tokens=1024,
             system=SYSTEM_PROMPT,
-            tools=TOOLS,
+            tools=tools,
             messages=messages,
         )
 
@@ -477,7 +567,7 @@ def run(
         _log(f"Tool: {tool_name} | Reasoning: {reasoning}")
 
         # Execute the tool
-        result = _execute_tool(tool_name, tool_params, udid, elements, step)
+        result = _execute_tool(tool_name, tool_params, udid, elements, step, config=config, bundle_id=bundle_id, goal=goal)
         _log(f"Result: {result}")
 
         # Track tap failures for stuck detection
@@ -495,7 +585,7 @@ def run(
         })
 
         # Audit screenshot after every action
-        screenshot.capture_with_label(
+        last_screenshot_path = screenshot.capture_with_label(
             udid, f"step_{step:02d}_{tool_name}"
         )
 
@@ -507,6 +597,8 @@ def run(
                 "steps": step,
                 "summary": tool_params.get("summary", "Goal achieved"),
                 "history": step_history,
+                "findings": [asdict(f) for f in all_findings],
+                "findings_count": len(all_findings),
             }
 
         if tool_name == "fail":
@@ -516,12 +608,28 @@ def run(
                 "steps": step,
                 "summary": tool_params.get("reason", "Agent failed"),
                 "history": step_history,
+                "findings": [asdict(f) for f in all_findings],
+                "findings_count": len(all_findings),
             }
 
         # Wait for UI to settle, then refresh
         time.sleep(1)
         elements, tree_json = _dump_tree(udid)
         _log(f"Refreshed tree: {len(elements)} elements")
+
+        # --- Intel: capture everything ---
+        tree_json_path = screenshot.save_tree_json(elements, f"step_{step:02d}_{tool_name}")
+        finding = intel.build_finding(
+            elements=elements,
+            bundle_id=bundle_id,
+            screenshot_path=last_screenshot_path or "",
+            tree_path=tree_json_path or "",
+            step=step,
+            goal=goal,
+        )
+        if finding.text_content:
+            intel.save_finding(finding)
+            all_findings.append(finding)
 
         # --- Stuck detection ---
         sig = _tree_signature(elements)
@@ -540,7 +648,7 @@ def run(
             recovery_attempt += 1
 
             if recovery_attempt <= 3:
-                recovery_result = _recover(udid, elements, recovery_attempt)
+                recovery_result = _recover(udid, elements, recovery_attempt, config=config)
                 _log(f"Recovery ({reason}): {recovery_result}")
                 step_history.append({
                     "step": step,
@@ -566,6 +674,8 @@ def run(
                     "steps": step,
                     "summary": f"Stuck: {reason}, all recovery attempts exhausted",
                     "history": step_history,
+                    "findings": [asdict(f) for f in all_findings],
+                    "findings_count": len(all_findings),
                 }
         else:
             # Reset recovery counter when the agent makes progress
@@ -594,4 +704,6 @@ def run(
         "steps": max_steps,
         "summary": f"Reached max steps ({max_steps}) without completing goal",
         "history": step_history,
+        "findings": [asdict(f) for f in all_findings],
+        "findings_count": len(all_findings),
     }

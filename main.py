@@ -12,7 +12,12 @@ import json
 import sys
 import time
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from scripts import simctl, idbwrap, screen_mapper, navigator, screenshot
+from scripts.device_config import DeviceConfig, detect
 
 # Safari search bar alternatives for self-correction
 SAFARI_ALTERNATIVES = [
@@ -28,8 +33,8 @@ def log(msg: str) -> None:
     print(f"[main] {msg}", file=sys.stderr)
 
 
-def boot_and_connect() -> str:
-    """Boot a simulator and connect idb. Returns UDID or exits."""
+def boot_and_connect() -> tuple[str, DeviceConfig]:
+    """Boot a simulator and connect idb. Returns (UDID, DeviceConfig) or exits."""
     log("Ensuring simulator is booted...")
     udid = simctl.ensure_booted()
     if not udid:
@@ -42,7 +47,10 @@ def boot_and_connect() -> str:
 
     log("Connecting idb...")
     idbwrap.connect(udid)
-    return udid
+
+    config = detect(udid)
+    log(f"Screen: {config.width}x{config.height} @{config.scale}x")
+    return udid, config
 
 
 def do_dump_tree(udid: str, bundle_id: str) -> list[dict]:
@@ -161,12 +169,13 @@ def main():
     if args.goal:
         from scripts import agent_loop
 
-        udid = boot_and_connect()
+        udid, config = boot_and_connect()
         result = agent_loop.run(
             goal=args.goal,
             udid=udid,
             bundle_id=args.bundle_id,
             max_steps=args.max_steps,
+            config=config,
         )
         status = "SUCCESS" if result["success"] else "FAILED"
         print(f"\n{'=' * 60}", file=sys.stderr)
@@ -184,7 +193,7 @@ def main():
     warnings: list[str] = []
 
     # Boot + connect
-    udid = boot_and_connect()
+    udid, config = boot_and_connect()
 
     # Dump tree (always needed if tapping or typing)
     elements = do_dump_tree(udid, args.bundle_id)

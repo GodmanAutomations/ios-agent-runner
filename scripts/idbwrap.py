@@ -246,11 +246,14 @@ def press_home(udid: str) -> bool:
     return False
 
 
-def scroll(udid: str, direction: str = "down") -> bool:
+def scroll(udid: str, direction: str = "down", config=None) -> bool:
     """Swipe the screen in a direction. Tries idb, falls back to simctl."""
-    # Screen center and swipe deltas (390x844 base, adjust as needed)
-    cx, cy = 195, 422
-    delta = 300
+    if config is None:
+        from scripts.device_config import detect
+        config = detect(udid)
+    cx = config.center_x
+    cy = config.center_y
+    delta = config.swipe_delta
     swipe_map = {
         "up":    (cx, cy + delta, cx, cy - delta),
         "down":  (cx, cy - delta, cx, cy + delta),

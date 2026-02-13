@@ -1,5 +1,6 @@
 """Capture iOS Simulator screenshots via xcrun simctl."""
 
+import json
 import os
 import re
 import subprocess
@@ -65,4 +66,26 @@ def capture_with_label(
         return dest
     except subprocess.CalledProcessError as exc:
         print(f"[screenshot] capture failed: {exc.stderr.decode().strip()}")
+        return None
+
+
+def save_tree_json(elements: list[dict], label: str, output_dir: str = "_artifacts/") -> str | None:
+    """Save accessibility tree JSON alongside the screenshot PNG.
+
+    Returns path to saved JSON file.
+    """
+    resolved_dir = _resolve_output_dir(output_dir)
+    os.makedirs(resolved_dir, exist_ok=True)
+
+    safe_label = _sanitize_label(label)
+    filename = f"tree_{safe_label}_{_timestamp()}.json"
+    dest = os.path.join(resolved_dir, filename)
+
+    try:
+        with open(dest, "w") as f:
+            json.dump(elements, f, indent=1)
+        print(f"[screenshot] saved tree {dest}")
+        return dest
+    except (OSError, TypeError) as exc:
+        print(f"[screenshot] tree save failed: {exc}")
         return None
