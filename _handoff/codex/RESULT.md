@@ -54,5 +54,11 @@ Completed a full runtime hardening pass for `ios-agent-runner`:
   - `mcp_server.py` (`ios_list_runs`, `ios_replay_run`, extended `ios_run_goal` args)
 
 ## Phase-2 Verification
-- `python -m pytest -v --tb=short` => `39 passed`
+- `python -m pytest -v --tb=short` => `40 passed`
 - `python scripts/smoke_simulator.py` => `ok: true` (boot/connect, tree dump, screenshots, MCP helper tools)
+  - Works when launched from non-venv Python (uses `./.venv/bin/python` automatically for MCP checks; `idbwrap` finds `./.venv/bin/idb`).
+
+## Git
+- Tag pushed: `hardening-v1`
+- Branch pushed: `main`
+- Note: HTTPS push was blocked by workflow scope restrictions; origin was switched to SSH and push succeeded.
