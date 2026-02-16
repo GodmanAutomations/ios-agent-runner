@@ -38,6 +38,7 @@ load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 load_dotenv(os.path.expanduser("~/.env"))  # OpenAI key lives here
 
 from scripts import agent_loop, doctor, dry_run, idbwrap, intel, run_report, run_state, screen_mapper, screenshot, simctl
+from scripts.integrations import figma_api, linear_api, notion_api, sentry_api
 from scripts import photo_sweep
 
 _OPTIONAL_MODULE_CACHE: dict[str, tuple[ModuleType | None, str | None]] = {}
@@ -301,6 +302,93 @@ def ios_dry_run_latest(strict: bool = False) -> str:
 def ios_doctor() -> str:
     """Environment checks to unlock full automation capabilities."""
     return json.dumps(doctor.collect_checks(), indent=2)
+
+
+@mcp.tool()
+def ios_notion_me() -> str:
+    """Validate Notion token by calling /users/me."""
+    return json.dumps(notion_api.me(), indent=2)
+
+
+@mcp.tool()
+def ios_notion_search(query: str, limit: int = 10) -> str:
+    """Search Notion workspace."""
+    return json.dumps(notion_api.search(query=query, limit=limit), indent=2)
+
+
+@mcp.tool()
+def ios_notion_create_page(parent_page_id: str, title: str, content: str = "") -> str:
+    """Create a Notion page under a parent page."""
+    return json.dumps(
+        notion_api.create_page(parent_page_id=parent_page_id, title=title, content=content),
+        indent=2,
+    )
+
+
+@mcp.tool()
+def ios_linear_viewer() -> str:
+    """Validate Linear token by calling viewer."""
+    return json.dumps(linear_api.viewer(), indent=2)
+
+
+@mcp.tool()
+def ios_linear_list_teams(limit: int = 20) -> str:
+    """List Linear teams."""
+    return json.dumps(linear_api.list_teams(limit=limit), indent=2)
+
+
+@mcp.tool()
+def ios_linear_create_issue(title: str, description: str = "", team_id: str = "") -> str:
+    """Create a Linear issue (team_id or LINEAR_TEAM_ID required)."""
+    return json.dumps(
+        linear_api.create_issue(title=title, description=description, team_id=team_id),
+        indent=2,
+    )
+
+
+@mcp.tool()
+def ios_sentry_me() -> str:
+    """Validate Sentry token (api root)."""
+    return json.dumps(sentry_api.me(), indent=2)
+
+
+@mcp.tool()
+def ios_sentry_list_orgs() -> str:
+    """List Sentry orgs visible to the token."""
+    return json.dumps(sentry_api.list_orgs(), indent=2)
+
+
+@mcp.tool()
+def ios_sentry_list_projects(org_slug: str) -> str:
+    """List Sentry projects for an org."""
+    return json.dumps(sentry_api.list_projects(org_slug=org_slug), indent=2)
+
+
+@mcp.tool()
+def ios_sentry_list_issues(org_slug: str, project_slug: str = "", query: str = "", limit: int = 20) -> str:
+    """List Sentry issues for an org (or a specific project)."""
+    return json.dumps(
+        sentry_api.list_issues(org_slug=org_slug, project_slug=project_slug, query=query, limit=limit),
+        indent=2,
+    )
+
+
+@mcp.tool()
+def ios_figma_me() -> str:
+    """Validate Figma token by calling /me."""
+    return json.dumps(figma_api.me(), indent=2)
+
+
+@mcp.tool()
+def ios_figma_file_meta(file_key: str) -> str:
+    """Fetch Figma file metadata (slim, excludes full document)."""
+    return json.dumps(figma_api.file_meta(file_key=file_key), indent=2)
+
+
+@mcp.tool()
+def ios_figma_nodes(file_key: str, node_ids: list[str]) -> str:
+    """Fetch Figma nodes by id list."""
+    return json.dumps(figma_api.nodes(file_key=file_key, node_ids=node_ids), indent=2)
 
 
 @mcp.tool()

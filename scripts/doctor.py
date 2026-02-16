@@ -17,8 +17,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Mirror the project's usual env loading behavior without ever printing secrets.
+load_dotenv(_PROJECT_ROOT / ".env")
+load_dotenv(Path.home() / ".env")
 
 
 def _run(cmd: list[str], timeout: int = 10) -> dict:

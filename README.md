@@ -79,6 +79,28 @@ Run this to see what "power switches" are missing on your machine (permissions, 
 python scripts/doctor.py
 ```
 
+## External Integrations (MCP Tools)
+
+These tools use env vars from `.env` / `~/.env` and never print secrets.
+
+- Notion:
+  - `ios_notion_me`
+  - `ios_notion_search`
+  - `ios_notion_create_page`
+- Linear:
+  - `ios_linear_viewer`
+  - `ios_linear_list_teams`
+  - `ios_linear_create_issue`
+- Sentry:
+  - `ios_sentry_me`
+  - `ios_sentry_list_orgs`
+  - `ios_sentry_list_projects`
+  - `ios_sentry_list_issues`
+- Figma:
+  - `ios_figma_me`
+  - `ios_figma_file_meta`
+  - `ios_figma_nodes`
+
 ### Local Simulator Smoke Check
 
 ```bash
