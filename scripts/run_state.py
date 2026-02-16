@@ -166,6 +166,14 @@ def list_runs(limit: int = 20) -> list[dict]:
     return items[: max(1, limit)]
 
 
+def latest_run_id() -> str | None:
+    """Return the most recent run_id, or None if no runs exist."""
+    rows = list_runs(limit=1)
+    if not rows:
+        return None
+    return str(rows[0].get("run_id") or "") or None
+
+
 def replay_run(run_id: str) -> dict:
     """Load state + all events for deterministic replay/audit."""
     state = load_state(run_id)

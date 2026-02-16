@@ -64,6 +64,13 @@ python main.py --dry-run-run-id run_20260216T000000Z_abc12345
 python main.py --render-report run_20260216T000000Z_abc12345
 ```
 
+Latest-run helpers:
+
+```bash
+python main.py --dry-run-latest
+python main.py --render-latest-report
+```
+
 ### Local Simulator Smoke Check
 
 ```bash

@@ -209,6 +209,16 @@ def main():
         type=str,
         help="Render an HTML report for a stored run ID",
     )
+    parser.add_argument(
+        "--render-latest-report",
+        action="store_true",
+        help="Render an HTML report for the most recent run",
+    )
+    parser.add_argument(
+        "--dry-run-latest",
+        action="store_true",
+        help="Dry-run validate the most recent run",
+    )
 
     args = parser.parse_args()
 
@@ -236,6 +246,31 @@ def main():
             sys.exit(1)
         print(json.dumps({"run_id": args.render_report, "report_path": path}, indent=2))
         sys.exit(0)
+
+    if args.render_latest_report:
+        from scripts import run_report
+
+        latest = run_state.latest_run_id()
+        if not latest:
+            print(json.dumps({"error": "no runs found"}, indent=2))
+            sys.exit(1)
+        path = run_report.render_run_report(latest)
+        if not path:
+            print(json.dumps({"error": "report render failed", "run_id": latest}, indent=2))
+            sys.exit(1)
+        print(json.dumps({"run_id": latest, "report_path": path}, indent=2))
+        sys.exit(0)
+
+    if args.dry_run_latest:
+        from scripts import dry_run
+
+        latest = run_state.latest_run_id()
+        if not latest:
+            print(json.dumps({"error": "no runs found"}, indent=2))
+            sys.exit(1)
+        report = dry_run.validate_run(latest, strict=False)
+        print(json.dumps(report, indent=2))
+        sys.exit(0 if report.get("ok") else 1)
 
     # Agent mode: --goal bypasses manual flags
     if args.goal or args.resume_run_id:

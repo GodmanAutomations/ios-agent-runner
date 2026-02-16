@@ -277,6 +277,27 @@ def ios_render_run_report(run_id: str) -> str:
 
 
 @mcp.tool()
+def ios_render_latest_run_report() -> str:
+    """Render an HTML report for the most recent run."""
+    latest = run_state.latest_run_id()
+    if not latest:
+        return json.dumps({"error": "no runs found"}, indent=2)
+    path = run_report.render_run_report(latest)
+    if not path:
+        return json.dumps({"error": "report render failed", "run_id": latest}, indent=2)
+    return json.dumps({"run_id": latest, "report_path": path}, indent=2)
+
+
+@mcp.tool()
+def ios_dry_run_latest(strict: bool = False) -> str:
+    """Dry-run validate the most recent run."""
+    latest = run_state.latest_run_id()
+    if not latest:
+        return json.dumps({"error": "no runs found"}, indent=2)
+    return json.dumps(dry_run.validate_run(latest, strict=strict), indent=2)
+
+
+@mcp.tool()
 def ios_sweep_photos(count: int = 50) -> str:
     """Sweep through Photos app, screenshotting each photo.
 

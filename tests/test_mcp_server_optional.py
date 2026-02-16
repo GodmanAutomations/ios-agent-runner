@@ -94,3 +94,21 @@ def test_ios_render_run_report_returns_path(monkeypatch):
     payload = json.loads(mcp_server.ios_render_run_report("run_y"))
     assert payload["run_id"] == "run_y"
     assert payload["report_path"].endswith("run_y.html")
+
+
+def test_ios_render_latest_run_report(monkeypatch):
+    monkeypatch.setattr(mcp_server.run_state, "latest_run_id", lambda: "run_latest")
+    monkeypatch.setattr(mcp_server.run_report, "render_run_report", lambda run_id: f"/tmp/{run_id}.html")
+
+    payload = json.loads(mcp_server.ios_render_latest_run_report())
+    assert payload["run_id"] == "run_latest"
+    assert payload["report_path"].endswith("run_latest.html")
+
+
+def test_ios_dry_run_latest(monkeypatch):
+    monkeypatch.setattr(mcp_server.run_state, "latest_run_id", lambda: "run_latest")
+    monkeypatch.setattr(mcp_server.dry_run, "validate_run", lambda run_id, strict=False: {"run_id": run_id, "ok": True})
+
+    payload = json.loads(mcp_server.ios_dry_run_latest(strict=False))
+    assert payload["run_id"] == "run_latest"
+    assert payload["ok"] is True

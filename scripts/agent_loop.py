@@ -18,7 +18,7 @@ import anthropic
 
 from dataclasses import asdict, dataclass
 
-from scripts import idbwrap, intel, run_state, screen_mapper, screenshot
+from scripts import idbwrap, intel, run_report, run_state, screen_mapper, screenshot
 from scripts.safe_mode import SafeModePolicy
 
 MODEL = "claude-sonnet-4-5-20250929"
@@ -700,6 +700,7 @@ def run(
         if stop_after_step is not None and step > stop_after_step:
             pause_summary = f"Paused after step {step - 1} (stop_after_step={stop_after_step})"
             run_state.finalize_run(state, "paused", pause_summary, step - 1)
+            run_report.render_run_report(run_id)
             return {
                 "success": False,
                 "paused": True,
@@ -743,6 +744,7 @@ def run(
             step_history.append(failure_record)
             run_state.append_history(state, failure_record)
             run_state.finalize_run(state, "failed", failure_message, step)
+            run_report.render_run_report(run_id)
             return {
                 "success": False,
                 "steps": step,
@@ -857,6 +859,7 @@ def run(
             _log(f"Agent finished: {result}")
             summary = tool_params.get("summary", "Goal achieved")
             run_state.finalize_run(state, "completed", summary, step)
+            run_report.render_run_report(run_id)
             return {
                 "success": True,
                 "steps": step,
@@ -873,6 +876,7 @@ def run(
             _log(f"Agent gave up: {result}")
             summary = tool_params.get("reason", "Agent failed")
             run_state.finalize_run(state, "failed", summary, step)
+            run_report.render_run_report(run_id)
             return {
                 "success": False,
                 "steps": step,
@@ -964,6 +968,7 @@ def run(
                     f"Stuck: {reason}, all recovery attempts exhausted",
                     step,
                 )
+                run_report.render_run_report(run_id)
                 return {
                     "success": False,
                     "steps": step,
@@ -999,6 +1004,7 @@ def run(
         if stop_after_step is not None and step >= stop_after_step:
             pause_summary = f"Paused after step {step} (stop_after_step={stop_after_step})"
             run_state.finalize_run(state, "paused", pause_summary, step)
+            run_report.render_run_report(run_id)
             return {
                 "success": False,
                 "paused": True,
@@ -1015,6 +1021,7 @@ def run(
     _log("Max steps reached")
     max_step_summary = f"Reached max steps ({max_steps}) without completing goal"
     run_state.finalize_run(state, "failed", max_step_summary, max_steps)
+    run_report.render_run_report(run_id)
     return {
         "success": False,
         "steps": max_steps,
