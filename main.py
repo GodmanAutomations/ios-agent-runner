@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from scripts import simctl, idbwrap, screen_mapper, navigator, screenshot
+from scripts import simctl, idbwrap, screen_mapper, navigator, run_state, screenshot
 from scripts.device_config import DeviceConfig, detect
 
 # Safari search bar alternatives for self-correction
@@ -162,26 +162,83 @@ def main():
         default=20,
         help="Max agent loop iterations (default: 20)",
     )
+    parser.add_argument(
+        "--unsafe",
+        action="store_true",
+        help="Disable safe-mode policy guardrails in agent mode",
+    )
+    parser.add_argument(
+        "--allow-tap-xy",
+        action="store_true",
+        help="Allow coordinate taps while in safe mode",
+    )
+    parser.add_argument(
+        "--allow-bundle-prefix",
+        action="append",
+        default=[],
+        help="Additional allowed bundle prefixes for safe mode (repeatable)",
+    )
+    parser.add_argument(
+        "--resume-run-id",
+        type=str,
+        help="Resume a paused run by run ID",
+    )
+    parser.add_argument(
+        "--stop-after-step",
+        type=int,
+        default=0,
+        help="Pause the run after N steps (0 disables pause)",
+    )
+    parser.add_argument(
+        "--list-runs",
+        action="store_true",
+        help="List recent persisted agent runs",
+    )
+    parser.add_argument(
+        "--replay-run",
+        type=str,
+        help="Replay a persisted run by run ID",
+    )
 
     args = parser.parse_args()
 
+    if args.list_runs:
+        print(json.dumps(run_state.list_runs(limit=20), indent=2))
+        sys.exit(0)
+
+    if args.replay_run:
+        print(json.dumps(run_state.replay_run(args.replay_run), indent=2))
+        sys.exit(0)
+
     # Agent mode: --goal bypasses manual flags
-    if args.goal:
+    if args.goal or args.resume_run_id:
         from scripts import agent_loop
 
         udid, config = boot_and_connect()
         result = agent_loop.run(
-            goal=args.goal,
+            goal=args.goal or "",
             udid=udid,
             bundle_id=args.bundle_id,
             max_steps=args.max_steps,
             config=config,
+            safe_mode=not args.unsafe,
+            resume_run_id=args.resume_run_id or None,
+            stop_after_step=(args.stop_after_step if args.stop_after_step > 0 else None),
+            allow_tap_xy=args.allow_tap_xy,
+            allowed_bundle_prefixes=args.allow_bundle_prefix,
         )
-        status = "SUCCESS" if result["success"] else "FAILED"
+        paused = bool(result.get("paused"))
+        status = "PAUSED" if paused else ("SUCCESS" if result["success"] else "FAILED")
         print(f"\n{'=' * 60}", file=sys.stderr)
         print(f"AGENT {status} in {result['steps']} steps", file=sys.stderr)
         print(f"Summary: {result['summary']}", file=sys.stderr)
+        if result.get("run_id"):
+            print(f"Run ID: {result['run_id']}", file=sys.stderr)
+        if result.get("run_paths"):
+            print(f"Run Artifacts: {result['run_paths']['run_dir']}", file=sys.stderr)
         print(f"{'=' * 60}", file=sys.stderr)
+        if paused:
+            sys.exit(0)
         sys.exit(0 if result["success"] else 1)
 
     # Must specify at least one action

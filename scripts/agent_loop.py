@@ -16,9 +16,10 @@ import time
 
 import anthropic
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 
-from scripts import idbwrap, intel, screen_mapper, screenshot
+from scripts import idbwrap, intel, run_state, screen_mapper, screenshot
+from scripts.safe_mode import SafeModePolicy
 
 MODEL = "claude-sonnet-4-5-20250929"
 
@@ -54,6 +55,16 @@ Common bundle IDs (simulator):
 - com.apple.Health — Health
 Note: Not all apps are available on every simulator. If open_app fails, the app is not installed.
 """
+
+
+@dataclass
+class PlannedAction:
+    """Planner output for one tool execution step."""
+
+    name: str
+    params: dict
+    tool_use_id: str
+    reasoning: str
 
 def _build_tools(config=None) -> list[dict]:
     """Build the tool definitions, interpolating actual screen dimensions."""
@@ -368,18 +379,19 @@ def _call_model(
     tools: list[dict],
     messages: list[dict],
     retries: int = 3,
-) -> object:
+) -> tuple[object, int]:
     """Call Anthropic with bounded retries for transient API failures."""
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-            return client.messages.create(
+            response = client.messages.create(
                 model=MODEL,
                 max_tokens=1024,
                 system=SYSTEM_PROMPT,
                 tools=tools,
                 messages=messages,
             )
+            return response, attempt - 1
         except Exception as exc:
             last_error = exc
             wait_seconds = min(2 ** (attempt - 1), 8)
@@ -388,6 +400,28 @@ def _call_model(
                 _log(f"Retrying model call in {wait_seconds}s")
                 time.sleep(wait_seconds)
     raise RuntimeError(f"Model call failed after {retries} attempts: {last_error}")
+
+
+def _plan_next_action(response: object) -> tuple[PlannedAction | None, list[str]]:
+    """Extract planner output from model response blocks."""
+    tool_block = None
+    text_parts: list[str] = []
+    for block in response.content:
+        if block.type == "tool_use":
+            tool_block = block
+        elif block.type == "text":
+            text_parts.append(block.text)
+
+    if tool_block is None:
+        return None, text_parts
+
+    params = tool_block.input if isinstance(tool_block.input, dict) else {}
+    return PlannedAction(
+        name=tool_block.name,
+        params=params,
+        tool_use_id=tool_block.id,
+        reasoning=str(params.get("reasoning", "")),
+    ), text_parts
 
 
 def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step: int, config=None, bundle_id: str = "", goal: str = "") -> str:
@@ -488,12 +522,40 @@ def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step
         return f"ERROR: Unknown tool '{name}'"
 
 
+def _execute_planned_action(
+    action: PlannedAction,
+    udid: str,
+    elements: list[dict],
+    step: int,
+    config=None,
+    bundle_id: str = "",
+    goal: str = "",
+) -> str:
+    """Execute planner output through the executor."""
+    return _execute_tool(
+        action.name,
+        action.params,
+        udid,
+        elements,
+        step,
+        config=config,
+        bundle_id=bundle_id,
+        goal=goal,
+    )
+
+
 def run(
     goal: str,
     udid: str,
     bundle_id: str = "com.apple.mobilesafari",
     max_steps: int = 20,
     config=None,
+    safe_mode: bool = True,
+    run_id: str | None = None,
+    resume_run_id: str | None = None,
+    stop_after_step: int | None = None,
+    allow_tap_xy: bool = False,
+    allowed_bundle_prefixes: list[str] | None = None,
 ) -> dict:
     """Run the autonomous agent loop.
 
@@ -507,8 +569,63 @@ def run(
         from scripts.device_config import detect
         config = detect(udid)
 
+    policy = SafeModePolicy() if safe_mode else SafeModePolicy.disabled()
+    if allow_tap_xy:
+        policy.allow_tap_xy = True
+    if allowed_bundle_prefixes:
+        merged = tuple(dict.fromkeys(policy.allowed_bundle_prefixes + tuple(allowed_bundle_prefixes)))
+        policy.allowed_bundle_prefixes = merged
+
+    max_steps = policy.effective_max_steps(max_steps)
+
+    state: dict
+    start_step = 1
+    if resume_run_id:
+        loaded = run_state.load_state(resume_run_id)
+        if loaded is None:
+            return {
+                "success": False,
+                "steps": 0,
+                "summary": f"Resume failed: run '{resume_run_id}' not found",
+                "history": [],
+                "findings": [],
+                "findings_count": 0,
+                "run_id": resume_run_id,
+                "status": "failed",
+            }
+        state = loaded
+        run_id = state.get("run_id", resume_run_id)
+        goal = state.get("goal", goal)
+        bundle_id = state.get("bundle_id", bundle_id)
+        max_steps = int(state.get("max_steps", max_steps))
+        start_step = int(state.get("last_step", 0)) + 1
+        state["status"] = "running"
+        run_state.save_state(state)
+    else:
+        bundle_allowed, bundle_reason = policy.validate_bundle(bundle_id)
+        if not bundle_allowed:
+            return {
+                "success": False,
+                "steps": 0,
+                "summary": f"Safe-mode blocked start bundle: {bundle_reason}",
+                "history": [],
+                "findings": [],
+                "findings_count": 0,
+                "status": "failed",
+            }
+        state = run_state.create_run(
+            goal=goal,
+            bundle_id=bundle_id,
+            udid=udid,
+            max_steps=max_steps,
+            safe_mode=safe_mode,
+            run_id=run_id,
+        )
+
     client = anthropic.Anthropic()
 
+    run_id = state["run_id"]
+    _log(f"Run ID: {run_id}")
     _log(f"Goal: {goal}")
     _log(f"Bundle: {bundle_id} | Max steps: {max_steps}")
     _log(f"Screen: {config.width}x{config.height} @{config.scale}x")
@@ -522,17 +639,18 @@ def run(
     _log(f"Initial tree: {len(elements)} elements")
 
     # Initial screenshot for audit trail
-    initial_ss = screenshot.capture_with_label(udid, "step_00_initial")
+    initial_label = "step_00_initial" if start_step == 1 else f"step_{start_step - 1:02d}_resume"
+    initial_ss = screenshot.capture_with_label(udid, initial_label)
 
     # --- Intel: capture initial screen ---
     all_findings: list[intel.Finding] = []
-    initial_tree_json_path = screenshot.save_tree_json(elements, "step_00_initial")
+    initial_tree_json_path = screenshot.save_tree_json(elements, initial_label)
     initial_finding = intel.build_finding(
         elements=elements,
         bundle_id=bundle_id,
         screenshot_path=initial_ss or "",
         tree_path=initial_tree_json_path or "",
-        step=0,
+        step=max(start_step - 1, 0),
         goal=goal,
     )
     if initial_finding.text_content:
@@ -540,8 +658,19 @@ def run(
         all_findings.append(initial_finding)
 
     # Build first user message (with vision fallback if tree is sparse)
+    step_history = list(state.get("history", []))
+    prior_context = ""
+    if step_history:
+        recent_steps = step_history[-5:]
+        lines = [
+            f"- step {row.get('step')}: {row.get('tool')} => {str(row.get('result', ''))[:160]}"
+            for row in recent_steps
+        ]
+        prior_context = "Previous run context:\n" + "\n".join(lines) + "\n\n"
+
     first_text = (
         f"GOAL: {goal}\n\n"
+        f"{prior_context}"
         f"Current app: {bundle_id}\n\n"
         f"Current accessibility tree:\n{tree_json}"
     )
@@ -554,26 +683,59 @@ def run(
 
     tools = _build_tools(config)
 
-    step_history = []
     recent_trees: list[str] = []
     consecutive_failures: int = 0
     recovery_attempt: int = 0
 
-    for step in range(1, max_steps + 1):
+    for step in range(start_step, max_steps + 1):
         _log(f"--- Step {step}/{max_steps} ---")
 
+        if stop_after_step is not None and step > stop_after_step:
+            pause_summary = f"Paused after step {step - 1} (stop_after_step={stop_after_step})"
+            run_state.finalize_run(state, "paused", pause_summary, step - 1)
+            return {
+                "success": False,
+                "paused": True,
+                "steps": step - 1,
+                "summary": pause_summary,
+                "history": step_history,
+                "findings": [asdict(f) for f in all_findings],
+                "findings_count": len(all_findings),
+                "run_id": run_id,
+                "run_paths": run_state.run_paths(run_id),
+                "status": "paused",
+            }
+
         # Call Claude with tool_use
+        model_start = time.monotonic()
         try:
-            response = _call_model(client, tools, messages)
+            response, retries = _call_model(client, tools, messages)
+            latency_ms = int((time.monotonic() - model_start) * 1000)
+            run_state.increment_metric(state, "model_calls", 1)
+            if retries:
+                run_state.increment_metric(state, "model_retries", retries)
+            run_state.append_event(
+                run_id,
+                {
+                    "type": "model_response",
+                    "step": step,
+                    "latency_ms": latency_ms,
+                    "retries": retries,
+                },
+            )
         except Exception as exc:
             failure_message = f"Model API failure: {exc}"
             _log(failure_message)
-            step_history.append({
+            run_state.increment_metric(state, "model_failures", 1)
+            failure_record = {
                 "step": step,
                 "tool": "_model_call",
                 "params": {},
                 "result": f"FAIL: {failure_message}",
-            })
+            }
+            step_history.append(failure_record)
+            run_state.append_history(state, failure_record)
+            run_state.finalize_run(state, "failed", failure_message, step)
             return {
                 "success": False,
                 "steps": step,
@@ -581,21 +743,17 @@ def run(
                 "history": step_history,
                 "findings": [asdict(f) for f in all_findings],
                 "findings_count": len(all_findings),
+                "run_id": run_id,
+                "run_paths": run_state.run_paths(run_id),
+                "status": "failed",
             }
 
-        # Extract the tool_use block from the response
-        tool_block = None
-        text_parts = []
-        for block in response.content:
-            if block.type == "tool_use":
-                tool_block = block
-            elif block.type == "text":
-                text_parts.append(block.text)
+        action, text_parts = _plan_next_action(response)
 
         if text_parts:
             _log(f"Claude says: {' '.join(text_parts)}")
 
-        if tool_block is None:
+        if action is None:
             # Claude didn't call a tool — nudge it
             _log("No tool call in response, nudging")
             messages.append({"role": "assistant", "content": response.content})
@@ -603,30 +761,73 @@ def run(
                 "role": "user",
                 "content": "You must call exactly one tool per turn. Please call a tool now.",
             })
+            run_state.append_event(
+                run_id,
+                {
+                    "type": "planner_no_action",
+                    "step": step,
+                },
+            )
             continue
 
-        tool_name = tool_block.name
-        tool_params = tool_block.input
-        reasoning = tool_params.get("reasoning", "")
-        _log(f"Tool: {tool_name} | Reasoning: {reasoning}")
+        tool_name = action.name
+        tool_params = action.params
+        _log(f"Tool: {tool_name} | Reasoning: {action.reasoning}")
 
-        # Execute the tool
-        result = _execute_tool(tool_name, tool_params, udid, elements, step, config=config, bundle_id=bundle_id, goal=goal)
+        # Safe-mode policy gate (planner/executor split)
+        allowed, policy_reason = policy.validate_action(tool_name, tool_params)
+        if not allowed:
+            result = f"POLICY BLOCKED: {policy_reason}"
+            run_state.increment_metric(state, "policy_blocks", 1)
+            run_state.append_event(
+                run_id,
+                {
+                    "type": "policy_block",
+                    "step": step,
+                    "tool": tool_name,
+                    "reason": policy_reason,
+                },
+            )
+        else:
+            action_start = time.monotonic()
+            result = _execute_planned_action(
+                action,
+                udid,
+                elements,
+                step,
+                config=config,
+                bundle_id=bundle_id,
+                goal=goal,
+            )
+            action_ms = int((time.monotonic() - action_start) * 1000)
+            run_state.append_event(
+                run_id,
+                {
+                    "type": "tool_executed",
+                    "step": step,
+                    "tool": tool_name,
+                    "latency_ms": action_ms,
+                    "result": result[:300],
+                },
+            )
         _log(f"Result: {result}")
 
-        # Track tap failures for stuck detection
-        if "FAILED" in result:
+        # Track failures for stuck detection
+        if "FAILED" in result or "POLICY BLOCKED" in result:
             consecutive_failures += 1
+            run_state.increment_metric(state, "action_failures", 1)
         else:
             consecutive_failures = 0
 
         # Record step
-        step_history.append({
+        step_record = {
             "step": step,
             "tool": tool_name,
             "params": tool_params,
             "result": result,
-        })
+        }
+        step_history.append(step_record)
+        run_state.append_history(state, step_record)
 
         # Audit screenshot after every action
         last_screenshot_path = screenshot.capture_with_label(
@@ -636,24 +837,34 @@ def run(
         # Check for terminal tools
         if tool_name == "done":
             _log(f"Agent finished: {result}")
+            summary = tool_params.get("summary", "Goal achieved")
+            run_state.finalize_run(state, "completed", summary, step)
             return {
                 "success": True,
                 "steps": step,
-                "summary": tool_params.get("summary", "Goal achieved"),
+                "summary": summary,
                 "history": step_history,
                 "findings": [asdict(f) for f in all_findings],
                 "findings_count": len(all_findings),
+                "run_id": run_id,
+                "run_paths": run_state.run_paths(run_id),
+                "status": "completed",
             }
 
         if tool_name == "fail":
             _log(f"Agent gave up: {result}")
+            summary = tool_params.get("reason", "Agent failed")
+            run_state.finalize_run(state, "failed", summary, step)
             return {
                 "success": False,
                 "steps": step,
-                "summary": tool_params.get("reason", "Agent failed"),
+                "summary": summary,
                 "history": step_history,
                 "findings": [asdict(f) for f in all_findings],
                 "findings_count": len(all_findings),
+                "run_id": run_id,
+                "run_paths": run_state.run_paths(run_id),
+                "status": "failed",
             }
 
         # Wait for UI to settle, then refresh
@@ -694,12 +905,14 @@ def run(
             if recovery_attempt <= 3:
                 recovery_result = _recover(udid, elements, recovery_attempt, config=config)
                 _log(f"Recovery ({reason}): {recovery_result}")
+                run_state.increment_metric(state, "recoveries", 1)
                 step_history.append({
                     "step": step,
                     "tool": "_recover",
                     "params": {"attempt": recovery_attempt, "reason": reason},
                     "result": recovery_result,
                 })
+                run_state.append_history(state, step_history[-1])
                 # Re-refresh the tree after recovery action
                 time.sleep(1)
                 elements, tree_json = _dump_tree(udid)
@@ -713,6 +926,13 @@ def run(
                     "params": {"reason": f"Stuck: {reason}, recovery exhausted"},
                     "result": "FAIL: agent stuck, all recovery attempts exhausted",
                 })
+                run_state.append_history(state, step_history[-1])
+                run_state.finalize_run(
+                    state,
+                    "failed",
+                    f"Stuck: {reason}, all recovery attempts exhausted",
+                    step,
+                )
                 return {
                     "success": False,
                     "steps": step,
@@ -720,6 +940,9 @@ def run(
                     "history": step_history,
                     "findings": [asdict(f) for f in all_findings],
                     "findings_count": len(all_findings),
+                    "run_id": run_id,
+                    "run_paths": run_state.run_paths(run_id),
+                    "status": "failed",
                 }
         else:
             # Reset recovery counter when the agent makes progress
@@ -734,7 +957,7 @@ def run(
             "content": [
                 {
                     "type": "tool_result",
-                    "tool_use_id": tool_block.id,
+                    "tool_use_id": action.tool_use_id,
                     "content": _build_user_content(
                         observation_text, udid, f"step_{step:02d}_tree", elements
                     ),
@@ -742,12 +965,33 @@ def run(
             ],
         })
 
+        if stop_after_step is not None and step >= stop_after_step:
+            pause_summary = f"Paused after step {step} (stop_after_step={stop_after_step})"
+            run_state.finalize_run(state, "paused", pause_summary, step)
+            return {
+                "success": False,
+                "paused": True,
+                "steps": step,
+                "summary": pause_summary,
+                "history": step_history,
+                "findings": [asdict(f) for f in all_findings],
+                "findings_count": len(all_findings),
+                "run_id": run_id,
+                "run_paths": run_state.run_paths(run_id),
+                "status": "paused",
+            }
+
     _log("Max steps reached")
+    max_step_summary = f"Reached max steps ({max_steps}) without completing goal"
+    run_state.finalize_run(state, "failed", max_step_summary, max_steps)
     return {
         "success": False,
         "steps": max_steps,
-        "summary": f"Reached max steps ({max_steps}) without completing goal",
+        "summary": max_step_summary,
         "history": step_history,
         "findings": [asdict(f) for f in all_findings],
         "findings_count": len(all_findings),
+        "run_id": run_id,
+        "run_paths": run_state.run_paths(run_id),
+        "status": "failed",
     }

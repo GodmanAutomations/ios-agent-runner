@@ -37,7 +37,7 @@ from mcp.server.fastmcp import FastMCP
 load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 load_dotenv(os.path.expanduser("~/.env"))  # OpenAI key lives here
 
-from scripts import agent_loop, idbwrap, intel, screen_mapper, screenshot, simctl
+from scripts import agent_loop, idbwrap, intel, run_state, screen_mapper, screenshot, simctl
 from scripts import photo_sweep
 
 _OPTIONAL_MODULE_CACHE: dict[str, tuple[ModuleType | None, str | None]] = {}
@@ -113,6 +113,10 @@ def ios_run_goal(
     goal: str,
     bundle_id: str = "com.apple.mobilesafari",
     max_steps: int = 20,
+    safe_mode: bool = True,
+    allow_tap_xy: bool = False,
+    stop_after_step: int = 0,
+    resume_run_id: str = "",
 ) -> str:
     """Run the autonomous agent loop with a plain-English goal.
 
@@ -123,6 +127,10 @@ def ios_run_goal(
         goal: Plain-English description of what to accomplish on the simulator.
         bundle_id: App bundle ID to launch (default: Safari).
         max_steps: Maximum number of agent iterations (default: 20).
+        safe_mode: Enable policy guardrails (default: true).
+        allow_tap_xy: Allow coordinate taps in safe mode (default: false).
+        stop_after_step: Pause run after N steps (default: 0 disabled).
+        resume_run_id: Resume an existing paused run ID (default: "").
 
     Returns:
         JSON string with keys: success, steps, summary, history.
@@ -133,6 +141,10 @@ def ios_run_goal(
         udid=udid,
         bundle_id=bundle_id,
         max_steps=max_steps,
+        safe_mode=safe_mode,
+        allow_tap_xy=allow_tap_xy,
+        stop_after_step=(stop_after_step if stop_after_step > 0 else None),
+        resume_run_id=(resume_run_id or None),
     )
     return json.dumps(result, indent=2)
 
@@ -235,6 +247,18 @@ def ios_runtime_health() -> str:
             },
         },
     }, indent=2)
+
+
+@mcp.tool()
+def ios_list_runs(limit: int = 20) -> str:
+    """List recent persisted autonomous runs."""
+    return json.dumps(run_state.list_runs(limit=limit), indent=2)
+
+
+@mcp.tool()
+def ios_replay_run(run_id: str) -> str:
+    """Replay stored telemetry/events for a run."""
+    return json.dumps(run_state.replay_run(run_id), indent=2)
 
 
 @mcp.tool()

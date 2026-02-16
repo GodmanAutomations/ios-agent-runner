@@ -39,3 +39,20 @@ Completed a full runtime hardening pass for `ios-agent-runner`:
 
 ## Follow-ups
 - Optional: install/document OCR extras explicitly in deployment environments that use those tools.
+
+## Phase-2 Additions (Post Baseline)
+- Implemented safe-mode guardrails and run-state persistence for pause/resume/replay:
+  - `scripts/safe_mode.py` (`SafeModePolicy`)
+  - `scripts/run_state.py` (state.json + events.jsonl under `_artifacts/runs/<run_id>/`)
+  - Updated `scripts/agent_loop.py` to a planner/executor split and persisted telemetry.
+- Added simulator smoke harness (no autonomous agent loop):
+  - `scripts/smoke_simulator.py`
+- Added CI workflow:
+  - `.github/workflows/ci.yml`
+- Extended CLI and MCP surface for run management:
+  - `main.py` (`--list-runs`, `--replay-run`, `--resume-run-id`, safe-mode flags)
+  - `mcp_server.py` (`ios_list_runs`, `ios_replay_run`, extended `ios_run_goal` args)
+
+## Phase-2 Verification
+- `python -m pytest -v --tb=short` => `39 passed`
+- `python scripts/smoke_simulator.py` => `ok: true` (boot/connect, tree dump, screenshots, MCP helper tools)

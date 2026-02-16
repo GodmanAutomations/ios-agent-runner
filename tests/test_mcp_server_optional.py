@@ -44,3 +44,29 @@ def test_ios_local_ocr_returns_error_when_module_unavailable(monkeypatch):
 
     assert payload["error"] == "Local OCR unavailable"
     assert payload["detail"] == "import failed"
+
+
+def test_ios_list_runs_uses_run_state(monkeypatch):
+    monkeypatch.setattr(
+        mcp_server.run_state,
+        "list_runs",
+        lambda limit=20: [{"run_id": "run_1", "status": "completed"}],
+    )
+
+    payload = json.loads(mcp_server.ios_list_runs(limit=5))
+
+    assert payload[0]["run_id"] == "run_1"
+    assert payload[0]["status"] == "completed"
+
+
+def test_ios_replay_run_uses_run_state(monkeypatch):
+    monkeypatch.setattr(
+        mcp_server.run_state,
+        "replay_run",
+        lambda run_id: {"run_id": run_id, "state": {"status": "paused"}, "events": []},
+    )
+
+    payload = json.loads(mcp_server.ios_replay_run("run_abc"))
+
+    assert payload["run_id"] == "run_abc"
+    assert payload["state"]["status"] == "paused"

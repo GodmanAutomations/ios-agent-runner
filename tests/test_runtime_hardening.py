@@ -55,9 +55,10 @@ def test_agent_loop_call_model_retries_then_succeeds(monkeypatch):
     sleeps: list[int] = []
     monkeypatch.setattr(agent_loop.time, "sleep", lambda seconds: sleeps.append(seconds))
 
-    response = agent_loop._call_model(FakeClient(), tools=[], messages=[], retries=3)
+    response, retries = agent_loop._call_model(FakeClient(), tools=[], messages=[], retries=3)
 
     assert response == {"status": "ok"}
+    assert retries == 2
     assert sleeps == [1, 2]
 
 

@@ -37,6 +37,33 @@ python main.py --tap-text "Search" --type-text "openai.com" --screenshot
 python main.py --bundle-id com.apple.Preferences --dump-tree
 ```
 
+### Agent Runs with Safe Mode + Resume
+
+```bash
+# Safe mode on by default
+python main.py --goal "Open Settings and read Wi-Fi status" --max-steps 20
+
+# Pause after 5 steps, then resume
+python main.py --goal "Open Settings and inspect Bluetooth" --stop-after-step 5
+python main.py --resume-run-id run_20260216T000000Z_abc12345
+
+# Inspect persisted runs
+python main.py --list-runs
+python main.py --replay-run run_20260216T000000Z_abc12345
+```
+
+Persisted run artifacts are stored in `_artifacts/runs/<run_id>/`:
+- `state.json` — latest run snapshot
+- `events.jsonl` — step-by-step telemetry
+
+### Local Simulator Smoke Check
+
+```bash
+python scripts/smoke_simulator.py
+```
+
+This verifies simulator boot/connect, tree dump, screenshot capture, and key MCP helper tools without running the paid autonomous loop.
+
 ## Architecture
 
 ```
@@ -53,3 +80,7 @@ _artifacts/          Output screenshots
 ## MCP Runtime Health
 
 `mcp_server.py` exposes `ios_runtime_health`, which reports whether optional OCR paths are available at runtime.
+
+Additional MCP run-state tools:
+- `ios_list_runs`
+- `ios_replay_run`
