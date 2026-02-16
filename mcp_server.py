@@ -37,7 +37,7 @@ from mcp.server.fastmcp import FastMCP
 load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 load_dotenv(os.path.expanduser("~/.env"))  # OpenAI key lives here
 
-from scripts import agent_loop, idbwrap, intel, run_state, screen_mapper, screenshot, simctl
+from scripts import agent_loop, dry_run, idbwrap, intel, run_report, run_state, screen_mapper, screenshot, simctl
 from scripts import photo_sweep
 
 _OPTIONAL_MODULE_CACHE: dict[str, tuple[ModuleType | None, str | None]] = {}
@@ -259,6 +259,21 @@ def ios_list_runs(limit: int = 20) -> str:
 def ios_replay_run(run_id: str) -> str:
     """Replay stored telemetry/events for a run."""
     return json.dumps(run_state.replay_run(run_id), indent=2)
+
+
+@mcp.tool()
+def ios_dry_run_validate(run_id: str, strict: bool = False) -> str:
+    """Validate a stored run without touching the simulator."""
+    return json.dumps(dry_run.validate_run(run_id, strict=strict), indent=2)
+
+
+@mcp.tool()
+def ios_render_run_report(run_id: str) -> str:
+    """Render an HTML report for a stored run and return its path."""
+    path = run_report.render_run_report(run_id)
+    if not path:
+        return json.dumps({"error": "report render failed", "run_id": run_id}, indent=2)
+    return json.dumps({"run_id": run_id, "report_path": path}, indent=2)
 
 
 @mcp.tool()

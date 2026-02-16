@@ -70,3 +70,27 @@ def test_ios_replay_run_uses_run_state(monkeypatch):
 
     assert payload["run_id"] == "run_abc"
     assert payload["state"]["status"] == "paused"
+
+
+def test_ios_dry_run_validate_uses_dry_run(monkeypatch):
+    monkeypatch.setattr(
+        mcp_server.dry_run,
+        "validate_run",
+        lambda run_id, strict=False: {"run_id": run_id, "ok": True},
+    )
+
+    payload = json.loads(mcp_server.ios_dry_run_validate("run_x"))
+    assert payload["run_id"] == "run_x"
+    assert payload["ok"] is True
+
+
+def test_ios_render_run_report_returns_path(monkeypatch):
+    monkeypatch.setattr(
+        mcp_server.run_report,
+        "render_run_report",
+        lambda run_id: f"/tmp/{run_id}.html",
+    )
+
+    payload = json.loads(mcp_server.ios_render_run_report("run_y"))
+    assert payload["run_id"] == "run_y"
+    assert payload["report_path"].endswith("run_y.html")

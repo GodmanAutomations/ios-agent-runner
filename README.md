@@ -55,6 +55,14 @@ python main.py --replay-run run_20260216T000000Z_abc12345
 Persisted run artifacts are stored in `_artifacts/runs/<run_id>/`:
 - `state.json` — latest run snapshot
 - `events.jsonl` — step-by-step telemetry
+- `report.html` — generated dashboard (optional)
+
+### Dry-Run Validation + HTML Report
+
+```bash
+python main.py --dry-run-run-id run_20260216T000000Z_abc12345
+python main.py --render-report run_20260216T000000Z_abc12345
+```
 
 ### Local Simulator Smoke Check
 

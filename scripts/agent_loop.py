@@ -621,6 +621,13 @@ def run(
             safe_mode=safe_mode,
             run_id=run_id,
         )
+        state["policy"] = {
+            "allow_tap_xy": bool(policy.allow_tap_xy),
+            "allow_open_app": bool(policy.allow_open_app),
+            "allowed_bundle_prefixes": list(policy.allowed_bundle_prefixes),
+            "blocked_tools": sorted(list(policy.blocked_tools)),
+        }
+        run_state.save_state(state)
 
     client = anthropic.Anthropic()
 
@@ -812,6 +819,21 @@ def run(
             )
         _log(f"Result: {result}")
 
+        # Audit screenshot after every action
+        last_screenshot_path = screenshot.capture_with_label(
+            udid, f"step_{step:02d}_{tool_name}"
+        )
+        if last_screenshot_path:
+            run_state.append_event(
+                run_id,
+                {
+                    "type": "screenshot_captured",
+                    "step": step,
+                    "tool": tool_name,
+                    "path": last_screenshot_path,
+                },
+            )
+
         # Track failures for stuck detection
         if "FAILED" in result or "POLICY BLOCKED" in result:
             consecutive_failures += 1
@@ -819,20 +841,16 @@ def run(
         else:
             consecutive_failures = 0
 
-        # Record step
+        # Record step (include artifact paths when available)
         step_record = {
             "step": step,
             "tool": tool_name,
             "params": tool_params,
             "result": result,
+            "screenshot_path": last_screenshot_path or "",
         }
         step_history.append(step_record)
         run_state.append_history(state, step_record)
-
-        # Audit screenshot after every action
-        last_screenshot_path = screenshot.capture_with_label(
-            udid, f"step_{step:02d}_{tool_name}"
-        )
 
         # Check for terminal tools
         if tool_name == "done":
@@ -874,6 +892,19 @@ def run(
 
         # --- Intel: capture everything ---
         tree_json_path = screenshot.save_tree_json(elements, f"step_{step:02d}_{tool_name}")
+        if tree_json_path:
+            run_state.append_event(
+                run_id,
+                {
+                    "type": "tree_saved",
+                    "step": step,
+                    "tool": tool_name,
+                    "path": tree_json_path,
+                },
+            )
+            # Back-fill the history record with tree path for reporting.
+            step_record["tree_path"] = tree_json_path
+            run_state.save_state(state)
         finding = intel.build_finding(
             elements=elements,
             bundle_id=bundle_id,

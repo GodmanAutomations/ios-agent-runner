@@ -199,6 +199,16 @@ def main():
         type=str,
         help="Replay a persisted run by run ID",
     )
+    parser.add_argument(
+        "--dry-run-run-id",
+        type=str,
+        help="Validate a stored run without touching the simulator",
+    )
+    parser.add_argument(
+        "--render-report",
+        type=str,
+        help="Render an HTML report for a stored run ID",
+    )
 
     args = parser.parse_args()
 
@@ -208,6 +218,23 @@ def main():
 
     if args.replay_run:
         print(json.dumps(run_state.replay_run(args.replay_run), indent=2))
+        sys.exit(0)
+
+    if args.dry_run_run_id:
+        from scripts import dry_run
+
+        report = dry_run.validate_run(args.dry_run_run_id, strict=False)
+        print(json.dumps(report, indent=2))
+        sys.exit(0 if report.get("ok") else 1)
+
+    if args.render_report:
+        from scripts import run_report
+
+        path = run_report.render_run_report(args.render_report)
+        if not path:
+            print(json.dumps({"error": "report render failed", "run_id": args.render_report}, indent=2))
+            sys.exit(1)
+        print(json.dumps({"run_id": args.render_report, "report_path": path}, indent=2))
         sys.exit(0)
 
     # Agent mode: --goal bypasses manual flags
