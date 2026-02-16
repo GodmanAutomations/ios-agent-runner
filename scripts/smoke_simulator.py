@@ -14,6 +14,7 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
+import subprocess
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
@@ -24,6 +25,58 @@ from scripts import idbwrap, screen_mapper, screenshot, simctl
 
 def _log(msg: str) -> None:
     print(f"[smoke] {msg}", file=sys.stderr)
+
+
+def _venv_python() -> str | None:
+    path = os.path.join(_PROJECT_ROOT, ".venv", "bin", "python")
+    return path if os.path.exists(path) else None
+
+
+def _run_mcp_checks_via_subprocess(bundle_id: str) -> tuple[bool, dict | str]:
+    venv_py = _venv_python()
+    if not venv_py:
+        return False, "no .venv python found"
+
+    code = (
+        "import json\n"
+        "import mcp_server\n"
+        "health = json.loads(mcp_server.ios_runtime_health())\n"
+        f"tree = json.loads(mcp_server.ios_dump_tree(bundle_id={bundle_id!r}))\n"
+        "shot = mcp_server.ios_screenshot()\n"
+        "payload = {\n"
+        "  'health': health,\n"
+        "  'tree_elements': len(tree),\n"
+        "  'screenshot_path': shot,\n"
+        "}\n"
+        "print('__MCP_JSON_START__')\n"
+        "print(json.dumps(payload))\n"
+        "print('__MCP_JSON_END__')\n"
+    )
+
+    proc = subprocess.run(
+        [venv_py, "-c", code],
+        cwd=_PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if proc.returncode != 0:
+        return False, (proc.stderr.strip() or proc.stdout.strip() or "mcp check subprocess failed")
+
+    marker_start = "__MCP_JSON_START__"
+    marker_end = "__MCP_JSON_END__"
+    out = proc.stdout
+    start = out.find(marker_start)
+    end = out.rfind(marker_end)
+    if start == -1 or end == -1 or end <= start:
+        return False, "mcp check subprocess returned invalid json markers"
+    json_text = out[start + len(marker_start):end].strip()
+    try:
+        payload = json.loads(json_text)
+    except json.JSONDecodeError:
+        return False, "mcp check subprocess returned invalid json payload"
+
+    return True, payload
 
 
 def run(bundle_id: str = "com.apple.Preferences") -> tuple[bool, dict]:
@@ -61,6 +114,7 @@ def run(bundle_id: str = "com.apple.Preferences") -> tuple[bool, dict]:
     if not report["checks"]["screenshot_saved"]:
         report["errors"].append("screenshot capture failed")
 
+    # MCP tool checks: attempt in-process import first, then fall back to venv subprocess.
     try:
         import mcp_server
 
@@ -74,8 +128,19 @@ def run(bundle_id: str = "com.apple.Preferences") -> tuple[bool, dict]:
             report["errors"].append("mcp screenshot tool failed")
         if not report["checks"]["mcp_dump_tree_elements"]:
             report["errors"].append("mcp dump_tree returned empty list")
-    except Exception as exc:
-        report["errors"].append(f"mcp tool checks failed: {exc}")
+    except Exception:
+        ok_sub, payload = _run_mcp_checks_via_subprocess(bundle_id=bundle_id)
+        if not ok_sub:
+            report["errors"].append(f"mcp tool checks failed: {payload}")
+        else:
+            report["checks"]["mcp_runtime_health"] = bool(payload["health"].get("features"))
+            report["checks"]["mcp_dump_tree_elements"] = int(payload["tree_elements"])
+            mcp_shot = payload.get("screenshot_path", "")
+            report["checks"]["mcp_screenshot_saved"] = bool(mcp_shot and os.path.exists(mcp_shot))
+            if not report["checks"]["mcp_screenshot_saved"]:
+                report["errors"].append("mcp screenshot tool failed (subprocess)")
+            if not report["checks"]["mcp_dump_tree_elements"]:
+                report["errors"].append("mcp dump_tree returned empty list (subprocess)")
 
     ok = not report["errors"]
     report["ok"] = ok

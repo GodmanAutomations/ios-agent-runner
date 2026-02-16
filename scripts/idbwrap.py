@@ -7,6 +7,7 @@ import sys
 import time
 
 IDB_COMPANION = "/opt/homebrew/bin/idb_companion"
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _idb_path: str | None = None
 _companion_proc: subprocess.Popen | None = None
@@ -21,6 +22,13 @@ def _find_idb() -> str | None:
     global _idb_path
     if _idb_path is not None:
         return _idb_path if _idb_path else None
+
+    # Check project venv bin directory (works even if current interpreter is not the venv python)
+    project_venv_idb = os.path.join(_PROJECT_ROOT, ".venv", "bin", "idb")
+    if os.path.isfile(project_venv_idb) and os.access(project_venv_idb, os.X_OK):
+        _idb_path = project_venv_idb
+        _log(f"idb found in project venv: {_idb_path}")
+        return _idb_path
 
     # Check venv bin directory (same dir as the running Python)
     venv_idb = os.path.join(os.path.dirname(sys.executable), "idb")
