@@ -1,38 +1,41 @@
 # RESULT
 
 ## Summary
-Implemented a comprehensive `pytest` suite for all public functions in `scripts/intel.py` within the ticket scope only. Added tests for extraction, classification (all categories including fallback and photo bundle shortcut), structured regex parsing, finding construction, JSONL persistence round-trip with append-only validation, and search/filter behavior.
+Completed a full runtime hardening pass for `ios-agent-runner`:
+- Added capability-aware optional dependency handling for OCR paths so MCP startup no longer depends on optional packages being installed.
+- Added `ios_runtime_health` MCP tool to expose runtime feature readiness.
+- Fixed `idbwrap.scroll` fallback to use a real drag gesture script.
+- Added model-call retries and structured failure handling in `agent_loop`.
+- Hardened tool execution result handling to surface action failures clearly.
+- Improved intel `since` filtering by parsing timestamps instead of raw string comparison.
+- Expanded test coverage from 16 to 29 passing tests across runtime reliability and optional dependency behavior.
 
 ## Files Changed
+- `README.md`
 - `_handoff/codex/PLAN.md`
 - `_handoff/codex/RESULT.md`
-- `_handoff/codex/DONE.flag`
-- `tests/__init__.py`
+- `mcp_server.py`
+- `scripts/agent_loop.py`
+- `scripts/idbwrap.py`
+- `scripts/intel.py`
+- `scripts/local_ocr.py`
+- `scripts/vision_extract.py`
 - `tests/test_intel.py`
+- `tests/test_mcp_server_optional.py`
+- `tests/test_optional_ocr.py`
+- `tests/test_runtime_hardening.py`
 
 ## Commands Run
-- `cat ./_handoff/codex/TICKET.md`
-- `pwd && ls -la`
-- `cat ./_handoff/codex/PLAN.md`
-- `sed -n '1,260p' scripts/intel.py`
-- `sed -n '260,520p' scripts/intel.py`
-- `ls -la tests`
-- `nl -ba ./_handoff/codex/PLAN.md`
-- `ls -la scripts`
-- `apply_patch` (update `_handoff/codex/PLAN.md`)
-- `apply_patch` (create `tests/__init__.py`)
-- `apply_patch` (create `tests/test_intel.py`)
-- `cat ./_handoff/codex/PLAN.md`
-- `source .venv/bin/activate && pip install pytest`
-- `source .venv/bin/activate && python -m pytest tests/test_intel.py -v`
-- `apply_patch` (update `_handoff/codex/PLAN.md`)
-- `ls -la ./_handoff/codex`
-- `cat >| ./_handoff/codex/RESULT.md <<'EOF' ...`
+- `cd /Users/stephengodman/ios-agent-runner && source .venv/bin/activate && python -m pytest -v --tb=short`
+- `cd /Users/stephengodman/ios-agent-runner && source .venv/bin/activate && python -c "import mcp_server; print('mcp_server import ok')"`
+- `cd /Users/stephengodman/ios-agent-runner && source .venv/bin/activate && python -c "from scripts import local_ocr, vision_extract; print('local_ocr:', local_ocr.is_available()); print('vision_extract:', vision_extract.is_available())"`
 
 ## Verification Results
-- `source .venv/bin/activate && pip install pytest` => success
-- `source .venv/bin/activate && python -m pytest tests/test_intel.py -v` => success
-- Pytest outcome: `16 passed in 0.02s`
+- `python -m pytest -v --tb=short` => `29 passed, 1 warning`
+  - Warning: `PytestCacheWarning` for `.pytest_cache` write permissions in sandbox.
+- `import mcp_server` => success (`mcp_server import ok`)
+- `local_ocr.is_available()` => `(True, "ok")` in current environment
+- `vision_extract.is_available()` => `(True, "ok")` in current environment
 
 ## Follow-ups
-- None required for ticket completion.
+- Optional: install/document OCR extras explicitly in deployment environments that use those tools.

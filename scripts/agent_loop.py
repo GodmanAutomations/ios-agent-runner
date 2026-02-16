@@ -363,6 +363,33 @@ def _recover(udid: str, elements: list[dict], attempt: int, config=None) -> str:
         return "RECOVERY: all attempts exhausted"
 
 
+def _call_model(
+    client: anthropic.Anthropic,
+    tools: list[dict],
+    messages: list[dict],
+    retries: int = 3,
+) -> object:
+    """Call Anthropic with bounded retries for transient API failures."""
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            return client.messages.create(
+                model=MODEL,
+                max_tokens=1024,
+                system=SYSTEM_PROMPT,
+                tools=tools,
+                messages=messages,
+            )
+        except Exception as exc:
+            last_error = exc
+            wait_seconds = min(2 ** (attempt - 1), 8)
+            _log(f"Model call failed ({attempt}/{retries}): {exc}")
+            if attempt < retries:
+                _log(f"Retrying model call in {wait_seconds}s")
+                time.sleep(wait_seconds)
+    raise RuntimeError(f"Model call failed after {retries} attempts: {last_error}")
+
+
 def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step: int, config=None, bundle_id: str = "", goal: str = "") -> str:
     """Execute a tool call and return a result string."""
     if name == "tap":
@@ -377,19 +404,22 @@ def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step
                 f"Available: {_element_summary(elements)}"
             )
         x, y = screen_mapper.get_element_center(el)
-        idbwrap.tap(udid, x, y)
+        if not idbwrap.tap(udid, x, y):
+            return f"TAP FAILED: Could not tap '{target_text}' at ({x}, {y})"
         return f"TAPPED '{el.get('searchable_text', target_text)}' at ({x}, {y}) [score={score}]"
 
     elif name == "type_text":
         text = params.get("text", "")
         if not text:
             return "ERROR: type_text requires 'text' param"
-        idbwrap.type_text(udid, text)
+        if not idbwrap.type_text(udid, text):
+            return "TYPE FAILED: Could not type text"
         return f"TYPED '{text}'"
 
     elif name == "scroll":
         direction = params.get("direction", "down")
-        idbwrap.scroll(udid, direction, config=config)
+        if not idbwrap.scroll(udid, direction, config=config):
+            return f"SCROLL FAILED: {direction}"
         return f"SCROLLED {direction}"
 
     elif name == "take_screenshot":
@@ -417,7 +447,8 @@ def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step
                 f"You are likely using image pixel coordinates instead of screen points. "
                 f"The screen is only {config.width}x{config.height}."
             )
-        idbwrap.tap(udid, x, y)
+        if not idbwrap.tap(udid, x, y):
+            return f"TAP FAILED: Could not tap coordinates ({x}, {y})"
         return f"TAPPED coordinates ({x}, {y})"
 
     elif name == "open_app":
@@ -431,7 +462,8 @@ def _execute_tool(name: str, params: dict, udid: str, elements: list[dict], step
         return f"OPENED {bid}"
 
     elif name == "press_home":
-        idbwrap.press_home(udid)
+        if not idbwrap.press_home(udid):
+            return "HOME FAILED: Could not press home"
         time.sleep(1)
         return "PRESSED HOME — now on springboard"
 
@@ -531,13 +563,25 @@ def run(
         _log(f"--- Step {step}/{max_steps} ---")
 
         # Call Claude with tool_use
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=1024,
-            system=SYSTEM_PROMPT,
-            tools=tools,
-            messages=messages,
-        )
+        try:
+            response = _call_model(client, tools, messages)
+        except Exception as exc:
+            failure_message = f"Model API failure: {exc}"
+            _log(failure_message)
+            step_history.append({
+                "step": step,
+                "tool": "_model_call",
+                "params": {},
+                "result": f"FAIL: {failure_message}",
+            })
+            return {
+                "success": False,
+                "steps": step,
+                "summary": failure_message,
+                "history": step_history,
+                "findings": [asdict(f) for f in all_findings],
+                "findings_count": len(all_findings),
+            }
 
         # Extract the tool_use block from the response
         tool_block = None
@@ -571,7 +615,7 @@ def run(
         _log(f"Result: {result}")
 
         # Track tap failures for stuck detection
-        if "TAP FAILED" in result:
+        if "FAILED" in result:
             consecutive_failures += 1
         else:
             consecutive_failures = 0

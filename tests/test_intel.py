@@ -266,3 +266,55 @@ def test_search_findings_filters_keyword_category_since_and_case_insensitive(iso
     assert [item["finding_id"] for item in since] == ["222222222222", "333333333333"]
     assert [item["finding_id"] for item in combined] == ["333333333333"]
     assert [item["finding_id"] for item in case_insensitive] == ["222222222222"]
+
+
+def test_search_findings_since_handles_timezone_and_invalid_timestamps(isolated_paths):
+    store, _ = isolated_paths
+
+    seeded = [
+        {
+            "timestamp": "2025-01-01T00:00:00Z",
+            "category": intel.ScreenCategory.APP_UI.value,
+            "source_app": "a",
+            "screenshot_path": "",
+            "tree_path": "",
+            "text_content": ["one"],
+            "extracted_data": {},
+            "tags": [],
+            "step": 1,
+            "goal": "g1",
+            "finding_id": "aaaaaaaaaaaa",
+        },
+        {
+            "timestamp": "2025-01-01T00:00:00+00:00",
+            "category": intel.ScreenCategory.APP_UI.value,
+            "source_app": "b",
+            "screenshot_path": "",
+            "tree_path": "",
+            "text_content": ["two"],
+            "extracted_data": {},
+            "tags": [],
+            "step": 2,
+            "goal": "g2",
+            "finding_id": "bbbbbbbbbbbb",
+        },
+        {
+            "timestamp": "not-a-timestamp",
+            "category": intel.ScreenCategory.APP_UI.value,
+            "source_app": "c",
+            "screenshot_path": "",
+            "tree_path": "",
+            "text_content": ["three"],
+            "extracted_data": {},
+            "tags": [],
+            "step": 3,
+            "goal": "g3",
+            "finding_id": "cccccccccccc",
+        },
+    ]
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text("\n".join(json.dumps(item) for item in seeded) + "\n")
+
+    results = intel.search_findings(since="2025-01-01T00:00:00+00:00")
+
+    assert [item["finding_id"] for item in results] == ["aaaaaaaaaaaa", "bbbbbbbbbbbb"]

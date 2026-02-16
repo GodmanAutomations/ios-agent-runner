@@ -15,18 +15,37 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-import Cocoa
-import Vision
-
 from scripts import intel
+
+_IMPORT_ERROR: str | None = None
+try:
+    import Cocoa  # type: ignore[no-redef]
+    import Vision  # type: ignore[no-redef]
+except Exception as exc:
+    Cocoa = None  # type: ignore[assignment]
+    Vision = None  # type: ignore[assignment]
+    _IMPORT_ERROR = str(exc)
 
 
 def _log(msg: str) -> None:
     print(f"[local_ocr] {msg}", file=sys.stderr)
 
 
+def is_available() -> tuple[bool, str]:
+    """Return whether local OCR dependencies are available."""
+    if Cocoa is None or Vision is None:
+        detail = _IMPORT_ERROR or "missing PyObjC Vision dependencies"
+        return False, f"local OCR unavailable: {detail}"
+    return True, "ok"
+
+
 def ocr_one(image_path: str) -> list[str]:
     """Run local OCR on a single image. Returns list of recognized text strings."""
+    available, detail = is_available()
+    if not available:
+        _log(detail)
+        return []
+
     try:
         img = Cocoa.NSImage.alloc().initWithContentsOfFile_(image_path)
         if img is None:
@@ -56,8 +75,8 @@ def ocr_one(image_path: str) -> list[str]:
 
         return texts
 
-    except Exception as e:
-        _log(f"Error processing {image_path}: {e}")
+    except Exception as exc:
+        _log(f"Error processing {image_path}: {exc}")
         return []
 
 
@@ -66,6 +85,14 @@ def process_batch(image_paths: list[str]) -> list[dict]:
 
     Returns list of result dicts with status and finding IDs.
     """
+    available, detail = is_available()
+    if not available:
+        _log(detail)
+        return [
+            {"path": path, "status": "failed", "error": detail}
+            for path in image_paths
+        ]
+
     results = []
 
     for i, path in enumerate(image_paths):

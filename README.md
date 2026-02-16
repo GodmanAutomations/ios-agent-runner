@@ -15,6 +15,15 @@ pip install -r requirements.txt
 - `xcode-select -s /Applications/Xcode.app/Contents/Developer`
 - `brew install idb-companion`
 
+### Optional OCR Dependencies
+- OpenAI vision extraction:
+  - `pip install openai`
+  - set `OPENAI_API_KEY` in `.env` or `~/.env`
+- Local macOS Vision OCR:
+  - `pip install pyobjc-framework-Cocoa pyobjc-framework-Vision`
+
+If optional OCR dependencies are missing, the MCP server still starts and the OCR tools return a clear capability error.
+
 ## Usage
 
 ```bash
@@ -40,3 +49,7 @@ scripts/
   screenshot.py      Screenshot capture to _artifacts/
 _artifacts/          Output screenshots
 ```
+
+## MCP Runtime Health
+
+`mcp_server.py` exposes `ios_runtime_health`, which reports whether optional OCR paths are available at runtime.

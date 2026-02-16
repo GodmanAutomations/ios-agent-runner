@@ -10,7 +10,7 @@ import re
 import sys
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
@@ -265,6 +265,7 @@ def search_findings(
     """Search by keyword, category, or date. Returns all matches."""
     all_findings = load_all_findings()
     results = []
+    since_epoch = _timestamp_epoch(since) if since else None
 
     for f in all_findings:
         # Category filter
@@ -274,7 +275,11 @@ def search_findings(
         # Date filter
         if since:
             ts = f.get("timestamp", "")
-            if ts < since:
+            if since_epoch is not None:
+                ts_epoch = _timestamp_epoch(ts)
+                if ts_epoch is None or ts_epoch < since_epoch:
+                    continue
+            elif ts < since:
                 continue
 
         # Keyword filter — search across all text content, tags, extracted data
@@ -293,6 +298,28 @@ def search_findings(
         results.append(f)
 
     return results
+
+
+def _timestamp_epoch(value: str | None) -> float | None:
+    """Parse an ISO-ish timestamp into epoch seconds for reliable comparisons."""
+    if not value:
+        return None
+
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+
+    try:
+        dt = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    return dt.timestamp()
 
 
 # ---------------------------------------------------------------------------

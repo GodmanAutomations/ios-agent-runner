@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import time
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -20,8 +21,6 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 # Also load home .env for OPENAI_API_KEY
 load_dotenv(os.path.expanduser("~/.env"))
-
-from openai import OpenAI
 
 from scripts import intel
 
@@ -50,13 +49,42 @@ def _log(msg: str) -> None:
     print(f"[vision] {msg}", file=sys.stderr)
 
 
+def is_available() -> tuple[bool, str]:
+    """Return whether OpenAI vision dependencies are configured."""
+    try:
+        import openai  # noqa: F401
+    except Exception as exc:
+        return False, f"OpenAI SDK unavailable: {exc}"
+
+    if not os.getenv("OPENAI_API_KEY"):
+        return False, "OPENAI_API_KEY is not set"
+
+    return True, "ok"
+
+
+def _build_openai_client() -> tuple[Any | None, str | None]:
+    """Create an OpenAI client for vision requests."""
+    try:
+        from openai import OpenAI
+    except Exception as exc:
+        return None, f"OpenAI SDK unavailable: {exc}"
+
+    if not os.getenv("OPENAI_API_KEY"):
+        return None, "OPENAI_API_KEY is not set"
+
+    try:
+        return OpenAI(), None
+    except Exception as exc:
+        return None, f"OpenAI client init failed: {exc}"
+
+
 def _image_to_b64(path: str) -> str:
     """Read a PNG and return base64-encoded string."""
     with open(path, "rb") as f:
         return base64.standard_b64encode(f.read()).decode("ascii")
 
 
-def extract_one(client: OpenAI, image_path: str, max_retries: int = 3) -> dict | None:
+def extract_one(client: Any, image_path: str, max_retries: int = 3) -> dict | None:
     """Send one image to OpenAI vision, return parsed extraction dict.
 
     Retries on 429 rate limit errors with exponential backoff.
@@ -147,7 +175,14 @@ def process_batch(
 
     Returns list of extraction results with finding IDs.
     """
-    client = OpenAI()
+    client, error = _build_openai_client()
+    if client is None:
+        _log(error or "OpenAI client unavailable")
+        return [
+            {"path": path, "status": "failed", "error": error or "OpenAI client unavailable"}
+            for path in image_paths
+        ]
+
     results = []
 
     for i, path in enumerate(image_paths):

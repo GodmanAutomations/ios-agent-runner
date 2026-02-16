@@ -23,6 +23,8 @@ import json
 import os
 import sys
 import time
+import importlib
+from types import ModuleType
 
 # Ensure project root is on sys.path so scripts/ imports work
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -36,7 +38,42 @@ load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 load_dotenv(os.path.expanduser("~/.env"))  # OpenAI key lives here
 
 from scripts import agent_loop, idbwrap, intel, screen_mapper, screenshot, simctl
-from scripts import photo_sweep, vision_extract, local_ocr
+from scripts import photo_sweep
+
+_OPTIONAL_MODULE_CACHE: dict[str, tuple[ModuleType | None, str | None]] = {}
+
+
+def _load_optional_module(module_name: str) -> tuple[ModuleType | None, str | None]:
+    """Import an optional module once and cache the outcome."""
+    cached = _OPTIONAL_MODULE_CACHE.get(module_name)
+    if cached is not None:
+        return cached
+
+    try:
+        module = importlib.import_module(module_name)
+        result = (module, None)
+    except Exception as exc:
+        result = (None, str(exc))
+
+    _OPTIONAL_MODULE_CACHE[module_name] = result
+    return result
+
+
+def _optional_feature_status(module_name: str) -> tuple[bool, str]:
+    """Return availability status for an optional feature module."""
+    module, error = _load_optional_module(module_name)
+    if module is None:
+        return False, error or "module import failed"
+
+    check = getattr(module, "is_available", None)
+    if callable(check):
+        try:
+            available, detail = check()
+            return bool(available), str(detail)
+        except Exception as exc:
+            return False, f"capability check failed: {exc}"
+
+    return True, "ok"
 
 # ---------------------------------------------------------------------------
 # Lazy simulator connection
@@ -179,6 +216,28 @@ def ios_recent_findings(count: int = 20) -> str:
 
 
 @mcp.tool()
+def ios_runtime_health() -> str:
+    """Report runtime capability status for optional OCR features."""
+    vision_ok, vision_detail = _optional_feature_status("scripts.vision_extract")
+    local_ok, local_detail = _optional_feature_status("scripts.local_ocr")
+
+    return json.dumps({
+        "python": sys.version.split()[0],
+        "openai_key_set": bool(os.getenv("OPENAI_API_KEY")),
+        "features": {
+            "vision_extract": {
+                "available": vision_ok,
+                "detail": vision_detail,
+            },
+            "local_ocr": {
+                "available": local_ok,
+                "detail": local_detail,
+            },
+        },
+    }, indent=2)
+
+
+@mcp.tool()
 def ios_sweep_photos(count: int = 50) -> str:
     """Sweep through Photos app, screenshotting each photo.
 
@@ -211,6 +270,20 @@ def ios_extract_photos(pattern: str = "screenshot_sweep_*_photo_*.png", limit: i
     """
     import glob as globmod
 
+    module, module_error = _load_optional_module("scripts.vision_extract")
+    if module is None:
+        return json.dumps({
+            "error": "Vision extraction unavailable",
+            "detail": module_error or "module import failed",
+        }, indent=2)
+
+    feature_ok, feature_detail = _optional_feature_status("scripts.vision_extract")
+    if not feature_ok:
+        return json.dumps({
+            "error": "Vision extraction unavailable",
+            "detail": feature_detail,
+        }, indent=2)
+
     artifacts_dir = os.path.join(_PROJECT_ROOT, "_artifacts")
     full_pattern = os.path.join(artifacts_dir, pattern)
     images = sorted(globmod.glob(full_pattern))
@@ -221,7 +294,7 @@ def ios_extract_photos(pattern: str = "screenshot_sweep_*_photo_*.png", limit: i
     if limit > 0:
         images = images[:limit]
 
-    results = vision_extract.process_batch(images, delay=0.3)
+    results = module.process_batch(images, delay=0.3)
 
     ok = sum(1 for r in results if r.get("status") == "ok")
     failed = sum(1 for r in results if r.get("status") == "failed")
@@ -253,13 +326,27 @@ def ios_sweep_and_extract(count: int = 50) -> str:
     Returns:
         JSON summary with sweep + extraction results.
     """
+    module, module_error = _load_optional_module("scripts.vision_extract")
+    if module is None:
+        return json.dumps({
+            "error": "Vision extraction unavailable",
+            "detail": module_error or "module import failed",
+        }, indent=2)
+
+    feature_ok, feature_detail = _optional_feature_status("scripts.vision_extract")
+    if not feature_ok:
+        return json.dumps({
+            "error": "Vision extraction unavailable",
+            "detail": feature_detail,
+        }, indent=2)
+
     # Step 1: Sweep
     paths = photo_sweep.sweep(count=count)
     if not paths:
         return json.dumps({"error": "Sweep captured no photos"})
 
     # Step 2: Extract
-    results = vision_extract.process_batch(paths, delay=0.3)
+    results = module.process_batch(paths, delay=0.3)
 
     ok = sum(1 for r in results if r.get("status") == "ok")
     failed = sum(1 for r in results if r.get("status") == "failed")
@@ -288,6 +375,20 @@ def ios_local_ocr(pattern: str = "screenshot_sweep_*_photo_*.png") -> str:
     """
     import glob as globmod
 
+    module, module_error = _load_optional_module("scripts.local_ocr")
+    if module is None:
+        return json.dumps({
+            "error": "Local OCR unavailable",
+            "detail": module_error or "module import failed",
+        }, indent=2)
+
+    feature_ok, feature_detail = _optional_feature_status("scripts.local_ocr")
+    if not feature_ok:
+        return json.dumps({
+            "error": "Local OCR unavailable",
+            "detail": feature_detail,
+        }, indent=2)
+
     artifacts_dir = os.path.join(_PROJECT_ROOT, "_artifacts")
     full_pattern = os.path.join(artifacts_dir, pattern)
     images = sorted(globmod.glob(full_pattern))
@@ -305,7 +406,7 @@ def ios_local_ocr(pattern: str = "screenshot_sweep_*_photo_*.png") -> str:
 
     import time
     start = time.time()
-    results = local_ocr.process_batch(images)
+    results = module.process_batch(images)
     elapsed = time.time() - start
 
     ok = sum(1 for r in results if r.get("status") == "ok")
@@ -339,6 +440,20 @@ def ios_sweep_and_ocr(count: int = 50) -> str:
     """
     import time
 
+    module, module_error = _load_optional_module("scripts.local_ocr")
+    if module is None:
+        return json.dumps({
+            "error": "Local OCR unavailable",
+            "detail": module_error or "module import failed",
+        }, indent=2)
+
+    feature_ok, feature_detail = _optional_feature_status("scripts.local_ocr")
+    if not feature_ok:
+        return json.dumps({
+            "error": "Local OCR unavailable",
+            "detail": feature_detail,
+        }, indent=2)
+
     # Step 1: Sweep
     paths = photo_sweep.sweep(count=count)
     if not paths:
@@ -346,7 +461,7 @@ def ios_sweep_and_ocr(count: int = 50) -> str:
 
     # Step 2: Local OCR
     start = time.time()
-    results = local_ocr.process_batch(paths)
+    results = module.process_batch(paths)
     elapsed = time.time() - start
 
     ok = sum(1 for r in results if r.get("status") == "ok")

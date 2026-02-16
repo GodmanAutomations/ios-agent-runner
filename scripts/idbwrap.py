@@ -278,15 +278,18 @@ def scroll(udid: str, direction: str = "down", config=None) -> bool:
             return True
         _log(f"idb ui swipe failed: {stderr.strip()}")
 
-    # Fallback: simctl with AppleScript drag
+    # Fallback: AppleScript drag gesture
     script = (
         f'tell application "Simulator" to activate\n'
         f'delay 0.2\n'
         f'tell application "System Events"\n'
-        f'  click at {{{x1}, {y1}}}\n'
-        f'  delay 0.1\n'
+        f'  drag from {{{x1}, {y1}}} to {{{x2}, {y2}}}\n'
         f'end tell'
     )
     stdout, stderr, rc = _run(["osascript", "-e", script])
-    _log(f"Scroll fallback attempted for {direction}")
-    return rc == 0
+    if rc == 0:
+        _log(f"Scrolled {direction} via AppleScript drag fallback")
+        return True
+
+    _log(f"Scroll fallback failed for {direction}: {stderr.strip()}")
+    return False
