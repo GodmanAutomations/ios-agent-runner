@@ -219,6 +219,11 @@ def main():
         action="store_true",
         help="Dry-run validate the most recent run",
     )
+    parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Run environment checks to unlock full automation capabilities",
+    )
 
     args = parser.parse_args()
 
@@ -271,6 +276,13 @@ def main():
         report = dry_run.validate_run(latest, strict=False)
         print(json.dumps(report, indent=2))
         sys.exit(0 if report.get("ok") else 1)
+
+    if args.doctor:
+        from scripts import doctor
+
+        payload = doctor.collect_checks()
+        print(json.dumps(payload, indent=2))
+        sys.exit(0 if payload.get("ok") else 1)
 
     # Agent mode: --goal bypasses manual flags
     if args.goal or args.resume_run_id:

@@ -37,7 +37,7 @@ from mcp.server.fastmcp import FastMCP
 load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 load_dotenv(os.path.expanduser("~/.env"))  # OpenAI key lives here
 
-from scripts import agent_loop, dry_run, idbwrap, intel, run_report, run_state, screen_mapper, screenshot, simctl
+from scripts import agent_loop, doctor, dry_run, idbwrap, intel, run_report, run_state, screen_mapper, screenshot, simctl
 from scripts import photo_sweep
 
 _OPTIONAL_MODULE_CACHE: dict[str, tuple[ModuleType | None, str | None]] = {}
@@ -295,6 +295,12 @@ def ios_dry_run_latest(strict: bool = False) -> str:
     if not latest:
         return json.dumps({"error": "no runs found"}, indent=2)
     return json.dumps(dry_run.validate_run(latest, strict=strict), indent=2)
+
+
+@mcp.tool()
+def ios_doctor() -> str:
+    """Environment checks to unlock full automation capabilities."""
+    return json.dumps(doctor.collect_checks(), indent=2)
 
 
 @mcp.tool()

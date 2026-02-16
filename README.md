@@ -71,6 +71,14 @@ python main.py --dry-run-latest
 python main.py --render-latest-report
 ```
 
+## Enablement Doctor
+
+Run this to see what "power switches" are missing on your machine (permissions, tokens, tools):
+
+```bash
+python scripts/doctor.py
+```
+
 ### Local Simulator Smoke Check
 
 ```bash
