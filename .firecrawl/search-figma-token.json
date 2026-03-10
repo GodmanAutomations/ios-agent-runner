@@ -1,0 +1,25 @@
+{
+  "success": true,
+  "data": {
+    "web": [
+      {
+        "url": "https://forum.figma.com/ask-the-community-7/personal-access-tokens-20973",
+        "title": "Personal access tokens",
+        "description": "Hi! Does anyone knows where are personal access tokens located? Previously, this feature was located in the account settings.",
+        "position": 1
+      },
+      {
+        "url": "https://www.youtube.com/watch?v=sJghnNqYao4",
+        "title": "How to Get Figma API Token - YouTube",
+        "description": "tutorial, I'll show you how to generate and copy your Figma personal access token step-by-step — perfect for developers, designers, and ...",
+        "position": 2
+      },
+      {
+        "url": "https://grida.co/docs/with-figma/guides/how-to-get-personal-access-token",
+        "title": "How to get Figma Personal Access Token",
+        "description": "Getting Personal Access Token from Figma · Sign in to your Figma account. · Click `\"+ Get personal access token\" · Copy the value when present.",
+        "position": 3
+      }
+    ]
+  }
+}

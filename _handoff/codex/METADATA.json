@@ -1,0 +1,7 @@
+{
+  "repo": "/Users/stephengodman/ios-agent-runner",
+  "branch": "main",
+  "started_at": "2026-02-13T03:44:07Z",
+  "codex_version": "codex-cli 0.98.0",
+  "handoff_dir": "./_handoff/codex"
+}

@@ -1,0 +1,25 @@
+{
+  "success": true,
+  "data": {
+    "web": [
+      {
+        "url": "https://docs.sentry.io/api/guides/create-auth-token/",
+        "title": "Tutorial: Create a Sentry Authentication Token",
+        "description": "Click \"Custom Integrations\" in the left side panel to create a new internal integration and org-level auth token. Press the \"Create New Integration\" ...",
+        "position": 1
+      },
+      {
+        "url": "https://docs.sentry.io/account/auth-tokens/",
+        "title": "Auth Tokens - Learn about the different kinds",
+        "description": "Organization tokens can be created in sentry.io on the Auth Tokens page under Settings > Developer Settings > Organization Tokens. They can also be generated ...",
+        "position": 2
+      },
+      {
+        "url": "https://developer.transmitsecurity.com/guides/automated-workflows/integrations/builtin/credentials/sentryio",
+        "title": "Sentry.io credentials - Mosaic documentation",
+        "description": "Access your Sentry.io Auth Tokens page. Click on the Create New Token button in the top right. Select any scopes you plan to use and then click on Create Token.",
+        "position": 3
+      }
+    ]
+  }
+}

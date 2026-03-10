@@ -8,6 +8,7 @@ Usage:
 """
 
 import argparse
+import os
 import json
 import sys
 import time
@@ -224,6 +225,17 @@ def main():
         action="store_true",
         help="Run environment checks to unlock full automation capabilities",
     )
+    parser.add_argument(
+        "--provider",
+        type=str,
+        default=os.getenv("AGENT_LOOP_PROVIDER", "local_qwen"),
+        help="Model provider for autonomous runs: local_qwen or anthropic",
+    )
+    parser.add_argument(
+        "--no-fallback",
+        action="store_true",
+        help="Disable fallback to Anthropic when local_qwen fails",
+    )
 
     args = parser.parse_args()
 
@@ -300,6 +312,8 @@ def main():
             stop_after_step=(args.stop_after_step if args.stop_after_step > 0 else None),
             allow_tap_xy=args.allow_tap_xy,
             allowed_bundle_prefixes=args.allow_bundle_prefix,
+            provider=args.provider,
+            allow_fallback=(not args.no_fallback),
         )
         paused = bool(result.get("paused"))
         status = "PAUSED" if paused else ("SUCCESS" if result["success"] else "FAILED")

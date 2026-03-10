@@ -1,0 +1,67 @@
+{
+  "success": true,
+  "data": {
+    "web": [
+      {
+        "url": "https://www.notion.com/templates/reminder-679?srsltid=AfmBOooV_RP6a6j7lkVAg0fZ20pPAwNQxz0EzliBYLtjhmobbLw0Kdvq",
+        "title": "Reminder Template | Notion Marketplace",
+        "description": "Welcome to the Notion template for organized management of reminders and events! This tool has been designed to help you keep track of your commitments.",
+        "position": 1
+      },
+      {
+        "url": "https://www.notion.com/templates/category/to-do-lists?srsltid=AfmBOop86uIKp26EStzx8YVhneb9L4iYmJG3wX4qnjnXVnJJk7pv1s0k",
+        "title": "Best To-Do Lists Templates from Notion",
+        "description": "Transform your productivity with Notion's To-Do Lists templates. Designed for daily tasks, project milestones, and everything in between.",
+        "position": 2
+      },
+      {
+        "url": "https://www.youtube.com/watch?v=ZPNPg95QD30",
+        "title": "Notion Reminders Are A Game Changer (Full Setup Guide) - YouTube",
+        "description": "Get My Notion Template https://gum.co/u/s3d6abal Rated 5 Stars ... Go to channel Mynd | Systems For ADHD · the most ADHD ...",
+        "position": 3
+      },
+      {
+        "url": "https://www.notion.com/help/reminders",
+        "title": "Reminders – Notion Help Center",
+        "description": "To create a reminder in a page: In a page, type @remind followed by a time, date, or both, as in @remind tomorrow , @remind 7pm , or @remind Wednesday at 1pm .",
+        "position": 4
+      },
+      {
+        "url": "https://www.notion.com/templates?srsltid=AfmBOorHAGehK9wKnGO0CgYuvqLcvGeIkoFBHUoQQQNsaEfOet9tm8DL",
+        "title": "Choose from 30,000+ Notion templates | Notion Marketplace",
+        "description": "Browse 30000+ free and customizable templates for every part of your work and life in our Marketplace.",
+        "position": 5
+      },
+      {
+        "url": "https://www.notioneverything.com/blog/free-notion-templates",
+        "title": "99 FREE Notion Templates for Everything [2026]",
+        "description": "Handle invoices with ease using this combined invoice tracker and invoice generator template. Track statuses, set reminders, and generate PDFs for seamless ...",
+        "position": 6
+      },
+      {
+        "url": "https://noteforms.com/resources/notion-reminders",
+        "title": "11 Popular Notion Reminders - NoteForms",
+        "description": "Using our Notion forms template, you can build a simple and effective reminder system that works for you. What Are Notion Reminders?",
+        "position": 7
+      },
+      {
+        "url": "https://www.landmarklabs.co/block/notion-reminders-template",
+        "title": "Notion Reminders Template: Daily, Week Before & More (2024)",
+        "description": "This template gives you a list of some common preset Notion reminders to edit, customize and try out for yourself. You can use it as your own Reminder Tasks ...",
+        "position": 8
+      },
+      {
+        "url": "https://www.notion.com/help/guides/reminders-and-mentions",
+        "title": "Reminders & @mentions - Notion",
+        "description": "Use the @ key to add a timestamp to a page. Set up reminders using the @ key, followed by remind , then type in the day and time for the reminder ...",
+        "position": 9
+      },
+      {
+        "url": "https://www.reddit.com/r/Notion/comments/1gr62xr/how_to_create_an_automation_to_set_reminders_on/",
+        "title": "How to create an automation to set reminders on date/time property?",
+        "description": "If you have your db configured with the Notion Calendar app, you can set time-based reminders (e.g. X min to 1 hour) but again not automated.",
+        "position": 10
+      }
+    ]
+  }
+}

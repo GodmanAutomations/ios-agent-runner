@@ -35,6 +35,7 @@ pip install -r requirements.txt
 ## Running
 
 ### CLI mode (manual actions)
+
 ```bash
 python main.py --dump-tree
 python main.py --tap-text "Search" --type-text "openai.com" --screenshot
@@ -42,17 +43,20 @@ python main.py --bundle-id com.apple.Preferences --dump-tree
 ```
 
 ### Agent mode (autonomous goal execution)
+
 ```bash
 python main.py --goal "Open Safari and search for weather in Austin"
 python main.py --goal "Open Settings and turn on Dark Mode" --max-steps 25
 ```
 
 ### MCP server (for Claude Code integration)
+
 ```bash
 python mcp_server.py
 ```
 
 MCP config for `~/.claude/mcp_servers.json`:
+
 ```json
 {
   "mcpServers": {
@@ -70,6 +74,7 @@ MCP tools exposed: `ios_run_goal`, `ios_screenshot`, `ios_dump_tree`.
 ## Tests
 
 No tests exist yet. Priority candidates for unit tests:
+
 - `scripts/screen_mapper.py` - frame parsing, tree flattening (pure functions, no simulator needed)
 - `scripts/navigator.py` - fuzzy matching logic (`find_element`, `find_candidates`)
 

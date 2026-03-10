@@ -38,6 +38,8 @@ def create_run(
     udid: str,
     max_steps: int,
     safe_mode: bool,
+    provider: str | None = None,
+    provider_chain: list[str] | None = None,
     run_id: str | None = None,
 ) -> dict:
     """Create a new run-state document and persist it."""
@@ -50,6 +52,8 @@ def create_run(
         "udid": udid,
         "max_steps": max_steps,
         "safe_mode": safe_mode,
+        "provider": provider or "",
+        "provider_chain": provider_chain or [],
         "status": "running",
         "summary": "",
         "history": [],
@@ -61,6 +65,7 @@ def create_run(
             "model_calls": 0,
             "model_retries": 0,
             "model_failures": 0,
+            "provider_fallbacks": 0,
             "policy_blocks": 0,
             "action_failures": 0,
             "recoveries": 0,
@@ -159,6 +164,7 @@ def list_runs(limit: int = 20) -> list[dict]:
                 "created_at": state.get("created_at", ""),
                 "updated_at": state.get("updated_at", ""),
                 "summary": state.get("summary", ""),
+                "provider": state.get("provider", ""),
             }
         )
 

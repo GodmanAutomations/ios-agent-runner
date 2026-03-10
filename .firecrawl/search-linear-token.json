@@ -1,0 +1,25 @@
+{
+  "success": true,
+  "data": {
+    "web": [
+      {
+        "url": "https://www.merge.dev/blog/linear-api-key",
+        "title": "How to get your API key in Linear (5 steps)",
+        "description": "1. Create an account or login · 2. Visit your workspace settings · ‍3. Click on “API” · 4. Select “Create new API key” · 5. Store the key in a secure location.",
+        "position": 1
+      },
+      {
+        "url": "https://linear.app/developers",
+        "title": "Linear Developers",
+        "description": "Learn how to use the GraphQL API to query and mutate your data · Authentication. Use OAuth 2.0 or personal API keys to authenticate your requests to the Linear ...",
+        "position": 2
+      },
+      {
+        "url": "https://helpdesk.smaply.app/integrations/planning-tools/linear/configuring-linear-with-personal-api-key",
+        "title": "Configuring Linear with Personal API key - Smaply Helpdesk",
+        "description": "Go to the Linear security and access settings page at linear.app/settings/account/security. Under Personal API keys, select 'Create a new API key' and give it ...",
+        "position": 3
+      }
+    ]
+  }
+}

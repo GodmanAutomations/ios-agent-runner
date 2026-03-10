@@ -1,7 +1,9 @@
 # RESULT
 
 ## Summary
+
 Completed a full runtime hardening pass for `ios-agent-runner`:
+
 - Added capability-aware optional dependency handling for OCR paths so MCP startup no longer depends on optional packages being installed.
 - Added `ios_runtime_health` MCP tool to expose runtime feature readiness.
 - Fixed `idbwrap.scroll` fallback to use a real drag gesture script.
@@ -11,6 +13,7 @@ Completed a full runtime hardening pass for `ios-agent-runner`:
 - Expanded test coverage from 16 to 29 passing tests across runtime reliability and optional dependency behavior.
 
 ## Files Changed
+
 - `README.md`
 - `_handoff/codex/PLAN.md`
 - `_handoff/codex/RESULT.md`
@@ -26,11 +29,13 @@ Completed a full runtime hardening pass for `ios-agent-runner`:
 - `tests/test_runtime_hardening.py`
 
 ## Commands Run
+
 - `cd /Users/stephengodman/ios-agent-runner && source .venv/bin/activate && python -m pytest -v --tb=short`
 - `cd /Users/stephengodman/ios-agent-runner && source .venv/bin/activate && python -c "import mcp_server; print('mcp_server import ok')"`
 - `cd /Users/stephengodman/ios-agent-runner && source .venv/bin/activate && python -c "from scripts import local_ocr, vision_extract; print('local_ocr:', local_ocr.is_available()); print('vision_extract:', vision_extract.is_available())"`
 
 ## Verification Results
+
 - `python -m pytest -v --tb=short` => `29 passed, 1 warning`
   - Warning: `PytestCacheWarning` for `.pytest_cache` write permissions in sandbox.
 - `import mcp_server` => success (`mcp_server import ok`)
@@ -38,9 +43,11 @@ Completed a full runtime hardening pass for `ios-agent-runner`:
 - `vision_extract.is_available()` => `(True, "ok")` in current environment
 
 ## Follow-ups
+
 - Optional: install/document OCR extras explicitly in deployment environments that use those tools.
 
 ## Phase-2 Additions (Post Baseline)
+
 - Implemented safe-mode guardrails and run-state persistence for pause/resume/replay:
   - `scripts/safe_mode.py` (`SafeModePolicy`)
   - `scripts/run_state.py` (state.json + events.jsonl under `_artifacts/runs/<run_id>/`)
@@ -54,11 +61,13 @@ Completed a full runtime hardening pass for `ios-agent-runner`:
   - `mcp_server.py` (`ios_list_runs`, `ios_replay_run`, extended `ios_run_goal` args)
 
 ## Phase-2 Verification
+
 - `python -m pytest -v --tb=short` => `40 passed`
 - `python scripts/smoke_simulator.py` => `ok: true` (boot/connect, tree dump, screenshots, MCP helper tools)
   - Works when launched from non-venv Python (uses `./.venv/bin/python` automatically for MCP checks; `idbwrap` finds `./.venv/bin/idb`).
 
 ## Git
+
 - Tag pushed: `hardening-v1`
 - Branch pushed: `main`
 - Note: HTTPS push was blocked by workflow scope restrictions; origin was switched to SSH and push succeeded.

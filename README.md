@@ -11,11 +11,13 @@ pip install -r requirements.txt
 ```
 
 ### Prerequisites
+
 - macOS with Xcode (full, not just CommandLineTools)
 - `xcode-select -s /Applications/Xcode.app/Contents/Developer`
 - `brew install idb-companion`
 
 ### Optional OCR Dependencies
+
 - OpenAI vision extraction:
   - `pip install openai`
   - set `OPENAI_API_KEY` in `.env` or `~/.env`
@@ -37,6 +39,28 @@ python main.py --tap-text "Search" --type-text "openai.com" --screenshot
 python main.py --bundle-id com.apple.Preferences --dump-tree
 ```
 
+### Provider + Cost Strategy (Local Qwen First)
+
+The autonomous loop supports local-first execution to avoid Anthropic API spend:
+
+```bash
+# Uses local Qwen first by default (if available)
+python main.py --goal "Open Settings and read Wi-Fi status"
+
+# Force Anthropic
+python main.py --goal "Open Messages and copy the top thread" --provider anthropic
+
+# Keep local only (no fallback to Anthropic)
+python main.py --goal "Test local flow only" --provider local_qwen --no-fallback
+```
+
+Provider defaults and overrides (from `.env`):
+
+- `AGENT_LOOP_PROVIDER=local_qwen|anthropic` (default: `local_qwen`)
+- `QWEN_MODEL=qwen2.5:latest`
+- `QWEN_BASE_URL=http://127.0.0.1:11434/v1`
+- `QWEN_API_KEY` (optional for some local gateways)
+
 ### Agent Runs with Safe Mode + Resume
 
 ```bash
@@ -53,6 +77,7 @@ python main.py --replay-run run_20260216T000000Z_abc12345
 ```
 
 Persisted run artifacts are stored in `_artifacts/runs/<run_id>/`:
+
 - `state.json` — latest run snapshot
 - `events.jsonl` — step-by-step telemetry
 - `report.html` — generated dashboard (optional)
@@ -127,5 +152,6 @@ _artifacts/          Output screenshots
 `mcp_server.py` exposes `ios_runtime_health`, which reports whether optional OCR paths are available at runtime.
 
 Additional MCP run-state tools:
+
 - `ios_list_runs`
 - `ios_replay_run`

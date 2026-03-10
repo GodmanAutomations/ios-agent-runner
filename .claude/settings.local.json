@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(for dir in \"/Users/stephengodman/ios-agent-runner\" \"/Users/stephengodman/clipboard-intelligence-mcp\" \"/Users/stephengodman/plaid-control-center\" \"/Users/stephengodman/yr01-console\" \"/Users/stephengodman/yr01-gateway\" \"/Users/stephengodman/ralph-claude-code\" \"/Users/stephengodman/kroger-playground\" \"/Users/stephengodman/godmanautomations-website\" \"/Users/stephengodman/stephen-call-pack\")",
+      "Bash(do)",
+      "Bash(if [ -d \"$dir\" ])",
+      "Bash(then)",
+      "Bash(else)",
+      "Bash(fi)",
+      "Bash(done)",
+      "Bash(for dir in \"/Volumes/VerteX/08 Projects/The_Claude_Project/salon-automation\" \"/Volumes/VerteX/08 Projects/The_Claude_Project/Control Hub\" \"/Volumes/VerteX/08 Projects/The_Claude_Project/second-brain\" \"/Volumes/VerteX/08 Projects/The_Claude_Project/artesian_pools_automation\" \"/Volumes/VerteX/08 Projects/The_Claude_Project/claude-vertex-agent\" \"/Volumes/VerteX/08 Projects/The_Claude_Project/Plaid Automation\" \"/Volumes/VerteX/08 Projects/The_Claude_Project/persona-lab\" \"/Volumes/VerteX/08 Projects/The_Claude_Project/ai_nas_node\" \"/Volumes/VerteX/08 Projects/The_Claude_Project/photo-caption-renamer\" \"/Volumes/VerteX/08 Projects/The_Claude_Project/Gmail Automation\" \"/Volumes/VerteX/08 Projects/The_Claude_Project/Trello Sync\" \"/Volumes/VerteX/08 Projects/The_Claude_Project/Pi-Server-Setup\" \"/Volumes/VerteX/08 Projects/The_Claude_Project/secrets-audit\")",
+      "Bash(for dir in \"/Volumes/VerteX/AI_HUB/02_PROJECTS/pool-app\" \"/Volumes/VerteX/Agents/Local AI Brain\" \"/Volumes/VerteX/Agents/ETL_Engine\" \"/Volumes/VerteX/Agents/Liner\" \"/Volumes/VerteX/AI_ENGINE/Max\" \"/Volumes/VerteX/mac_data/desktop/poolpart-identifier-pro_v4\" \"/Volumes/VerteX/mac_data/desktop/Pool Parts Identification APP\" \"/Volumes/VerteX/Projects/SSG_Orders\")"
+    ]
+  }
+}

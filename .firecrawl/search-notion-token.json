@@ -1,0 +1,25 @@
+{
+  "success": true,
+  "data": {
+    "web": [
+      {
+        "url": "https://www.notion.com/help/create-integrations-with-the-notion-api",
+        "title": "Notion API integrations – Notion Help Center",
+        "description": "In your left sidebar, navigate to Settings and then the Integrations tab. · Only Workspace owners will be able to access the Integrations tab and create ...",
+        "position": 1
+      },
+      {
+        "url": "https://developers.notion.com/guides/get-started/create-a-notion-integration",
+        "title": "Build your first integration - Notion Docs",
+        "description": "The first step to building any integration (internal or public) is to create a new integration in Notion's integrations dashboard. ... Click + New integration .",
+        "position": 2
+      },
+      {
+        "url": "https://www.notion.com/help/add-and-manage-connections-with-the-api",
+        "title": "Add & manage integrations – Notion Help Center",
+        "description": "With Notion's API, you'll be able to create custom internal integrations. Some of our partners may also require an internal integration token in order to ...",
+        "position": 3
+      }
+    ]
+  }
+}

@@ -3,16 +3,20 @@
 Give it a goal in plain English and it reads the screen, reasons, acts,
 reads again, and loops until done (or gives up).
 
-Uses Anthropic's native tool_use API for structured actions (no JSON parsing).
-Falls back to vision (screenshot) when the accessibility tree is empty.
+Uses local Qwen (OpenAI-compatible tool-calling) by default, with optional
+Anthropic fallback. Falls back to vision (screenshot) when the accessibility
+tree is empty.
 """
 
 import base64
+import urllib.request
 import hashlib
 import json
 import os
 import sys
 import time
+from typing import Any
+from types import SimpleNamespace
 
 import anthropic
 
@@ -22,26 +26,32 @@ from scripts import idbwrap, intel, run_report, run_state, screen_mapper, screen
 from scripts.safe_mode import SafeModePolicy
 
 MODEL = "claude-sonnet-4-5-20250929"
+LOCAL_QWEN_MODEL = os.getenv("QWEN_MODEL", "qwen2.5:latest")
+LOCAL_QWEN_BASE_URL = os.getenv("QWEN_BASE_URL", "http://127.0.0.1:11434/v1")
+LOCAL_QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")
+AGENT_LOOP_PROVIDER = os.getenv("AGENT_LOOP_PROVIDER", "local_qwen").lower()
 
 SYSTEM_PROMPT = """\
 You are an iOS automation agent controlling a real iPhone simulator.
+Your job: accomplish the user's goal by calling exactly ONE tool per turn.
 
-You see the screen via an accessibility tree (provided as JSON).
-Your job: accomplish the user's goal by calling exactly one tool per turn.
+CRITICAL RULES:
+- Call EXACTLY ONE tool per response. Do NOT describe multiple steps or plan ahead.
+- Pick the SINGLE NEXT action needed right now. You will get another turn after it executes.
+- Keep your text response SHORT (1-2 sentences max). Focus on the tool call, not explaining plans.
+- Do NOT output JSON in your text. Only use the tool_call mechanism.
 
-Guidelines:
+Tool usage guidelines:
 - Use "tap" with the visible label text — fuzzy matching is handled for you.
 - After typing a URL or search query, use press_key with RETURN to submit it.
 - After typing, the keyboard may cover the screen; scroll or tap elsewhere if needed.
 - Call "done" as soon as the goal is achieved. Call "fail" if truly stuck after multiple attempts.
-- If the accessibility tree is empty, you may receive a screenshot instead — use visual cues to act.
-- If you can see a button in the screenshot but it has no accessibility label, use tap_xy with coordinates.
-- Always explain your reasoning in the tool call parameters.
+- If the accessibility tree is empty, you may receive OCR text from a screenshot instead — use those text cues to act.
+- If you can see a button but it has no accessibility label, use tap_xy with coordinates.
 - You can switch between apps using open_app with a bundle ID.
 - Use press_home to return to the home screen.
-- CRITICAL: When you read text from the screen and need to reproduce it (e.g. copying a message into another app), you MUST type the EXACT text, character for character. Never paraphrase, summarize, or invent different words. If unsure, take a screenshot first and read carefully.
-- In Messages, the text input field ("iMessage") is at the very bottom of the screen. If tapping by label fails, use tap_xy at coordinates near the bottom center.
-
+- CRITICAL: When you read text from the screen and need to reproduce it, type the EXACT text character for character.
+- In Messages, the text input field ("iMessage") is at the very bottom of the screen.
 Common bundle IDs (simulator):
 - com.apple.mobilesafari — Safari
 - com.apple.Preferences — Settings
@@ -66,6 +76,264 @@ class PlannedAction:
     tool_use_id: str
     reasoning: str
 
+
+def _norm_provider(value: str | None) -> str:
+    """Normalize user/provider strings to supported values."""
+    normalized = (value or AGENT_LOOP_PROVIDER or "local_qwen").strip().lower()
+    if normalized in {"local", "local_qwen", "qwen", "qwen2", "qwen2.5", "qwen2_5", "qwen25"}:
+        return "local_qwen"
+    if normalized in {"anthropic", "claude", "claude-3", "claude3"}:
+        return "anthropic"
+    if normalized == "auto":
+        return "local_qwen"
+    return normalized
+
+
+def _as_dict(value: object) -> dict[str, Any]:
+    """Normalize anthropic/openai style dict-like messages and blocks."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, SimpleNamespace):
+        return value.__dict__
+    return {}
+
+
+def _to_openai_tools(tools: list[dict]) -> list[dict]:
+    """Convert anthropic tool definitions into OpenAI-compatible function tools."""
+    output = []
+    for tool in tools:
+        schema = {
+            "type": "function",
+            "function": {
+                "name": tool["name"],
+                "description": tool.get("description", ""),
+                "parameters": {
+                    "type": "object",
+                    "properties": tool["input_schema"]["properties"],
+                    "required": tool["input_schema"].get("required", []),
+                    "additionalProperties": False,
+                },
+            },
+        }
+        output.append(schema)
+    return output
+
+
+def _safe_serialize(value: object) -> str:
+    """Serialize tool outputs for tool-result messages."""
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value)
+    except TypeError:
+        return str(value)
+
+
+def _anthropic_to_openai_messages(messages: list[dict]) -> tuple[list[dict], dict[str, str]]:
+    """Translate internal anthropic-style messages into OpenAI chat message format.
+
+    Returns a list of converted messages and a mapping of tool_call_id → tool name.
+    """
+    converted: list[dict] = []
+    tool_name_by_id: dict[str, str] = {}
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content", "")
+        if role == "user":
+            if isinstance(content, str):
+                if content:
+                    converted.append({"role": "user", "content": content})
+                continue
+            if not isinstance(content, list):
+                continue
+            text_parts: list[str] = []
+            for raw_part in content:
+                part = _as_dict(raw_part)
+                ptype = part.get("type")
+                if ptype == "tool_result":
+                    tool_use_id = str(part.get("tool_use_id") or "")
+                    tool_name_by_id.setdefault(tool_use_id, "unknown_tool")
+                    converted.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_use_id,
+                            "name": tool_name_by_id.get(tool_use_id, "unknown_tool"),
+                            "content": _safe_serialize(part.get("content")),
+                        }
+                    )
+                elif ptype == "text":
+                    text = part.get("text", "")
+                    if text:
+                        text_parts.append(str(text))
+                elif ptype == "image":
+                    image = _as_dict(part.get("source", {}))
+                    data = image.get("data", "")
+                    if data:
+                        text_parts.append("Image provided in a previous context block.")
+                        converted.append(
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:image/png;base64,{data}",
+                                            "detail": "low",
+                                        },
+                                    }
+                                ],
+                            }
+                        )
+                elif isinstance(raw_part, dict) and "type" in part:
+                    # Fallback passthrough for non-tool-result block shapes.
+                    content_text = part.get("text") or part.get("content") or ""
+                    if isinstance(content_text, str):
+                        text_parts.append(content_text)
+            if text_parts:
+                converted.append({"role": "user", "content": "\n\n".join(text_parts)})
+            continue
+
+        if role == "assistant":
+            if isinstance(content, str):
+                if content.strip():
+                    converted.append({"role": "assistant", "content": content})
+                continue
+            if not isinstance(content, list):
+                continue
+
+            text_parts: list[str] = []
+            tool_calls = []
+            for raw_part in content:
+                part = _as_dict(raw_part)
+                if part.get("type") == "text":
+                    text = part.get("text", "")
+                    if text:
+                        text_parts.append(str(text))
+                elif part.get("type") == "tool_use":
+                    tool_name = str(part.get("name", ""))
+                    call_id = str(part.get("id") or f"call_{len(tool_calls)}")
+                    args = part.get("input") or {}
+                    tool_name_by_id[call_id] = tool_name
+                    try:
+                        arguments = json.dumps(args) if isinstance(args, dict) else json.dumps({})
+                    except TypeError:
+                        arguments = "{}"
+                    tool_calls.append(
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {"name": tool_name, "arguments": arguments},
+                        }
+                    )
+            assistant_message: dict[str, Any] = {"role": "assistant"}
+            if text_parts:
+                assistant_message["content"] = "\n\n".join(text_parts)
+            else:
+                assistant_message["content"] = None
+            if tool_calls:
+                assistant_message["tool_calls"] = tool_calls
+            converted.append(assistant_message)
+            continue
+
+        if role == "system":
+            # OpenAI chat currently keeps system messages separate from user messages.
+            if isinstance(content, str) and content.strip():
+                converted.append({"role": "system", "content": content})
+
+    return converted, tool_name_by_id
+
+
+def _to_compat_response(payload: dict[str, Any], call_id_by_name: dict[str, str]) -> SimpleNamespace:
+    """Convert OpenAI tool-call responses back into anthropic-like blocks."""
+    message = payload["choices"][0]["message"]
+    blocks = []
+    if message.get("content"):
+        blocks.append(SimpleNamespace(type="text", text=str(message["content"])))
+    tool_calls = message.get("tool_calls") or []
+    for call in tool_calls:
+        fn = call.get("function") or {}
+        name = fn.get("name") or "unknown_tool"
+        tool_id = call.get("id") or f"tool_{len(blocks)}"
+        raw_args = fn.get("arguments", "{}")
+        try:
+            args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args or {})
+        except (TypeError, json.JSONDecodeError):
+            args = {}
+        if tool_id:
+            call_id_by_name.setdefault(tool_id, name)
+        blocks.append(
+            SimpleNamespace(
+                type="tool_use",
+                id=tool_id,
+                name=name,
+                input=args,
+            )
+        )
+    return SimpleNamespace(content=blocks)
+
+
+def _resolve_local_model_env() -> tuple[str, str, str]:
+    """Reload model config from environment so .env can be read at runtime."""
+    return (
+        os.getenv("QWEN_MODEL", LOCAL_QWEN_MODEL),
+        os.getenv("QWEN_BASE_URL", LOCAL_QWEN_BASE_URL),
+        os.getenv("QWEN_API_KEY", LOCAL_QWEN_API_KEY),
+    )
+
+
+def _call_local_model(
+    tools: list[dict],
+    messages: list[dict],
+    retries: int = 3,
+    model: str = LOCAL_QWEN_MODEL,
+    base_url: str = LOCAL_QWEN_BASE_URL,
+    api_key: str = "",
+) -> tuple[SimpleNamespace, int]:
+    """Call a local OpenAI-compatible endpoint and adapt outputs."""
+    endpoint = base_url.rstrip("/") + "/chat/completions"
+    payload_messages, tool_name_by_id = _anthropic_to_openai_messages(messages)
+    # Prepend system prompt if not already present
+    if not any(m.get("role") == "system" for m in payload_messages):
+        payload_messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+    request_payload = {
+        "model": model,
+        "messages": payload_messages,
+        "tools": _to_openai_tools(tools),
+        "tool_choice": "auto",
+        "max_tokens": 512,
+        "temperature": 0.1,
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            req = urllib.request.Request(
+                endpoint,
+                data=json.dumps(request_payload).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30) as response:
+                raw = json.loads(response.read().decode("utf-8"))
+            if not isinstance(raw, dict):
+                raise RuntimeError("local model returned non-JSON response")
+            if not raw.get("choices"):
+                raise RuntimeError("local model returned no choices")
+            return _to_compat_response(raw, tool_name_by_id), attempt - 1
+        except Exception as exc:
+            last_error = exc
+            wait_seconds = min(2 ** (attempt - 1), 8)
+            _log(f"Local model call failed ({attempt}/{retries}): {exc}")
+            if attempt < retries:
+                _log(f"Retrying local model call in {wait_seconds}s")
+                time.sleep(wait_seconds)
+    raise RuntimeError(f"Model call failed after {retries} attempts: {last_error}")
 def _build_tools(config=None) -> list[dict]:
     """Build the tool definitions, interpolating actual screen dimensions."""
     if config is not None:
@@ -303,23 +571,48 @@ def _screenshot_b64(udid: str, label: str, max_dim: int = 1600) -> str | None:
 
 
 def _build_user_content(
-    text: str, udid: str, label: str, elements: list[dict]
+    text: str, udid: str, label: str, elements: list[dict],
+    provider: str = "anthropic",
 ) -> list[dict]:
-    """Build a user message content array — text + optional screenshot if tree is sparse."""
-    parts: list[dict] = [{"type": "text", "text": text}]
+    """Build a user message content array — text + optional screenshot if tree is sparse.
 
-    # If tree has fewer than 8 meaningful elements, add a screenshot for vision.
-    # Messages conversations typically have 6-7 elements with sparse labels,
-    # so we need a generous threshold to ensure vision is used.
+    For vision-capable providers (anthropic), attaches the screenshot as a base64 image.
+    For text-only providers (local_qwen), runs macOS Vision OCR on the screenshot and
+    appends the extracted text instead.
+    """
+    parts: list[dict] = [{"type": "text", "text": text}]
+    # If tree has fewer than 8 meaningful elements, augment with screenshot data.
     meaningful = [e for e in elements if e.get("label") or e.get("name") or e.get("title")]
     if len(meaningful) < 8:
-        _log(f"Sparse tree ({len(meaningful)} labeled elements) — adding screenshot for vision")
-        b64 = _screenshot_b64(udid, label)
-        if b64:
-            parts.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": "image/png", "data": b64},
-            })
+        _log(f"Sparse tree ({len(meaningful)} labeled elements) — augmenting with screenshot")
+        provider = _norm_provider(provider)
+
+        if provider == "local_qwen":
+            # Text-only model: OCR the screenshot and include as text
+            from scripts import local_ocr
+            shot_path = screenshot.capture_with_label(udid, label)
+            if shot_path and os.path.exists(shot_path):
+                ocr_texts = local_ocr.ocr_one(shot_path)
+                if ocr_texts:
+                    # Limit OCR to 20 lines to stay within Qwen's 8k context
+                    truncated = ocr_texts[:20]
+                    ocr_block = "\n".join(truncated)
+                    suffix = f" (showing {len(truncated)}/{len(ocr_texts)})" if len(ocr_texts) > 20 else ""
+                    parts.append({
+                        "type": "text",
+                        "text": f"[Screenshot OCR{suffix}:]\n{ocr_block}",
+                    })
+                    _log(f"OCR extracted {len(ocr_texts)} text blocks, sent {len(truncated)}")
+                else:
+                    _log("OCR returned no text from screenshot")
+        else:
+            # Vision-capable model: send base64 image
+            b64 = _screenshot_b64(udid, label)
+            if b64:
+                parts.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": b64},
+                })
     return parts
 
 
@@ -375,12 +668,32 @@ def _recover(udid: str, elements: list[dict], attempt: int, config=None) -> str:
 
 
 def _call_model(
-    client: anthropic.Anthropic,
+    client: anthropic.Anthropic | None,
     tools: list[dict],
     messages: list[dict],
     retries: int = 3,
+    provider: str = "anthropic",
+    local_model: str = LOCAL_QWEN_MODEL,
+    local_base_url: str = LOCAL_QWEN_BASE_URL,
+    local_api_key: str = LOCAL_QWEN_API_KEY,
 ) -> tuple[object, int]:
-    """Call Anthropic with bounded retries for transient API failures."""
+    """Call the selected model provider with retries for transient API failures."""
+    provider = _norm_provider(provider)
+    if provider == "local_qwen":
+        return _call_local_model(
+            tools=tools,
+            messages=messages,
+            retries=retries,
+            model=local_model,
+            base_url=local_base_url,
+            api_key=local_api_key,
+        )
+    if provider != "anthropic":
+        raise RuntimeError(f"Unsupported model provider: {provider}")
+
+    if client is None:
+        raise RuntimeError("Anthropic client is required for provider=anthropic")
+
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
@@ -396,9 +709,9 @@ def _call_model(
             last_error = exc
             wait_seconds = min(2 ** (attempt - 1), 8)
             _log(f"Model call failed ({attempt}/{retries}): {exc}")
-            if attempt < retries:
-                _log(f"Retrying model call in {wait_seconds}s")
-                time.sleep(wait_seconds)
+        if attempt < retries:
+            _log(f"Retrying model call in {wait_seconds}s")
+            time.sleep(wait_seconds)
     raise RuntimeError(f"Model call failed after {retries} attempts: {last_error}")
 
 
@@ -406,20 +719,25 @@ def _plan_next_action(response: object) -> tuple[PlannedAction | None, list[str]
     """Extract planner output from model response blocks."""
     tool_block = None
     text_parts: list[str] = []
-    for block in response.content:
-        if block.type == "tool_use":
+    for block in getattr(response, "content", []) or []:
+        btype = _as_dict(block).get("type") or getattr(block, "type", "")
+        if btype == "tool_use":
             tool_block = block
-        elif block.type == "text":
-            text_parts.append(block.text)
+        elif btype == "text":
+            text = _as_dict(block).get("text", "")
+            if text:
+                text_parts.append(str(text))
 
     if tool_block is None:
         return None, text_parts
 
-    params = tool_block.input if isinstance(tool_block.input, dict) else {}
+    params = _as_dict(tool_block).get("input")
+    if not isinstance(params, dict):
+        params = {}
     return PlannedAction(
-        name=tool_block.name,
+        name=_as_dict(tool_block).get("name", ""),
         params=params,
-        tool_use_id=tool_block.id,
+        tool_use_id=str(_as_dict(tool_block).get("id", "")),
         reasoning=str(params.get("reasoning", "")),
     ), text_parts
 
@@ -556,6 +874,8 @@ def run(
     stop_after_step: int | None = None,
     allow_tap_xy: bool = False,
     allowed_bundle_prefixes: list[str] | None = None,
+    provider: str | None = None,
+    allow_fallback: bool = True,
 ) -> dict:
     """Run the autonomous agent loop.
 
@@ -619,6 +939,10 @@ def run(
             udid=udid,
             max_steps=max_steps,
             safe_mode=safe_mode,
+            provider=_norm_provider(provider),
+            provider_chain=[_norm_provider(provider)] + (
+                ["anthropic"] if allow_fallback and _norm_provider(provider) == "local_qwen" else []
+            ),
             run_id=run_id,
         )
         state["policy"] = {
@@ -629,7 +953,31 @@ def run(
         }
         run_state.save_state(state)
 
-    client = anthropic.Anthropic()
+    preferred_provider = _norm_provider(provider) if resume_run_id is None else str(state.get("provider", _norm_provider(provider)))
+    provider_chain_raw = state.get("provider_chain")
+    if provider_chain_raw:
+        provider_chain = [item for item in provider_chain_raw if item in {"local_qwen", "anthropic"}]
+    else:
+        provider_chain = [_norm_provider(preferred_provider)]
+        if allow_fallback and preferred_provider == "local_qwen":
+            provider_chain.append("anthropic")
+    provider_chain = [p for p in provider_chain if p in {"local_qwen", "anthropic"}]
+    provider_chain = [p for p in [_norm_provider(p) for p in provider_chain] if p in {"local_qwen", "anthropic"}]
+    provider_chain = list(dict.fromkeys(provider_chain))
+    if not provider_chain:
+        provider_chain = ["local_qwen"]
+        if allow_fallback:
+            provider_chain.append("anthropic")
+
+    active_provider = provider_chain[0]
+    requires_anthropic = any(p == "anthropic" for p in provider_chain)
+    client = anthropic.Anthropic() if requires_anthropic else None
+    local_model, local_base_url, local_api_key = _resolve_local_model_env()
+    state["provider_chain"] = provider_chain
+    state["provider"] = active_provider
+    run_state.save_state(state)
+
+    _log(f"Model providers: {' -> '.join(provider_chain)}")
 
     run_id = state["run_id"]
     _log(f"Run ID: {run_id}")
@@ -684,7 +1032,7 @@ def run(
     messages = [
         {
             "role": "user",
-            "content": _build_user_content(first_text, udid, "step_00_tree", elements),
+            "content": _build_user_content(first_text, udid, "step_00_tree", elements, provider=active_provider),
         }
     ]
 
@@ -714,25 +1062,66 @@ def run(
                 "status": "paused",
             }
 
-        # Call Claude with tool_use
+        # Sliding window: for local_qwen (8k context), keep first message + last 6 messages
+        # to avoid context overflow. Anthropic has 200k context so no trimming needed.
+        call_messages = messages
+        if active_provider == "local_qwen" and len(messages) > 7:
+            call_messages = messages[:1] + messages[-6:]
+            _log(f"Context trimmed: {len(messages)} -> {len(call_messages)} messages (sliding window)")
+
+        # Call model provider chain with optional fallback.
+        response = None
+        retries = 0
+        provider_error: str = ""
         model_start = time.monotonic()
-        try:
-            response, retries = _call_model(client, tools, messages)
-            latency_ms = int((time.monotonic() - model_start) * 1000)
-            run_state.increment_metric(state, "model_calls", 1)
-            if retries:
-                run_state.increment_metric(state, "model_retries", retries)
-            run_state.append_event(
-                run_id,
-                {
-                    "type": "model_response",
-                    "step": step,
-                    "latency_ms": latency_ms,
-                    "retries": retries,
-                },
-            )
-        except Exception as exc:
-            failure_message = f"Model API failure: {exc}"
+        for idx, attempt_provider in enumerate(provider_chain):
+            attempt_provider = _norm_provider(attempt_provider)
+            state["provider"] = attempt_provider
+            attempt_start = time.monotonic()
+            attempt_retries = 0
+            try:
+                response, attempt_retries = _call_model(
+                    client,
+                    tools,
+                    call_messages,
+                    provider=attempt_provider,
+                    local_model=local_model,
+                    local_base_url=local_base_url,
+                    local_api_key=local_api_key,
+                )
+                retries = attempt_retries
+                break
+            except Exception as exc:
+                provider_error = str(exc)
+                _log(f"Model provider '{attempt_provider}' failed at step {step}: {provider_error}")
+                run_state.increment_metric(state, "model_calls", 1)
+                run_state.append_event(
+                    run_id,
+                    {
+                        "type": "model_call_failed",
+                        "step": step,
+                        "provider": attempt_provider,
+                        "latency_ms": int((time.monotonic() - attempt_start) * 1000),
+                        "error": provider_error,
+                        "retries": attempt_retries,
+                    },
+                )
+                if idx + 1 < len(provider_chain):
+                    run_state.increment_metric(state, "provider_fallbacks", 1)
+                    run_state.append_event(
+                        run_id,
+                        {
+                            "type": "provider_fallback",
+                            "step": step,
+                            "from_provider": attempt_provider,
+                            "to_provider": provider_chain[idx + 1],
+                            "reason": provider_error,
+                        },
+                    )
+                    _log(f"Falling back to provider '{provider_chain[idx + 1]}'")
+                    continue
+        if response is None:
+            failure_message = f"Model API failure: {provider_error or 'all providers failed'}"
             _log(failure_message)
             run_state.increment_metric(state, "model_failures", 1)
             failure_record = {
@@ -756,6 +1145,21 @@ def run(
                 "run_paths": run_state.run_paths(run_id),
                 "status": "failed",
             }
+
+        latency_ms = int((time.monotonic() - model_start) * 1000)
+        run_state.increment_metric(state, "model_calls", 1)
+        if retries:
+            run_state.increment_metric(state, "model_retries", retries)
+        run_state.append_event(
+            run_id,
+            {
+                "type": "model_response",
+                "step": step,
+                "provider": attempt_provider,
+                "latency_ms": latency_ms,
+                "retries": retries,
+            },
+        )
 
         action, text_parts = _plan_next_action(response)
 
@@ -995,7 +1399,8 @@ def run(
                     "type": "tool_result",
                     "tool_use_id": action.tool_use_id,
                     "content": _build_user_content(
-                        observation_text, udid, f"step_{step:02d}_tree", elements
+                        observation_text, udid, f"step_{step:02d}_tree", elements,
+                        provider=active_provider,
                     ),
                 }
             ],

@@ -1,0 +1,237 @@
+{
+  "audit_date": "2026-02-11",
+  "auditor": "Claude Opus 4.6 — God Mode CTO Audit",
+  "projects": [
+    {
+      "name": "ios-agent-runner",
+      "path": "/Users/stephengodman/ios-agent-runner",
+      "stack": "Python (anthropic SDK, thefuzz, idb)",
+      "status": "mvp",
+      "potential_score": 9,
+      "missing_for_god_mode": [
+        "No test suite",
+        "No CI/CD",
+        "No CLAUDE.md",
+        "Hardcoded screen dimensions in scroll/tap_xy"
+      ],
+      "architect_recommendation": "Highest-value demo project. Add pytest integration tests, wire up GitHub Actions, add CLAUDE.md. This is the showpiece for Godman Automations."
+    },
+    {
+      "name": "ralph-claude-code",
+      "path": "/Users/stephengodman/ralph-claude-code",
+      "stack": "Bash/Node.js (BATS testing, GitHub Actions)",
+      "status": "production",
+      "potential_score": 8,
+      "missing_for_god_mode": [
+        "Already has 465 tests and CI/CD",
+        "Could use public docs/marketing"
+      ],
+      "architect_recommendation": "Most mature project in the portfolio. 465 tests, CI/CD, modular libs. Package for distribution or open-source release."
+    },
+    {
+      "name": "plaid-control-center",
+      "path": "/Users/stephengodman/plaid-control-center",
+      "stack": "TypeScript/Next.js (Prisma, SQLite, Plaid SDK)",
+      "status": "mvp",
+      "potential_score": 7,
+      "missing_for_god_mode": [
+        "No test suite",
+        "No CI/CD",
+        "Needs Plaid production credentials for real use"
+      ],
+      "architect_recommendation": "Financial dashboard with real bank integration. Add integration tests and a demo mode for showcasing without live credentials."
+    },
+    {
+      "name": "kroger-playground",
+      "path": "/Users/stephengodman/kroger-playground",
+      "stack": "Python (Streamlit, Kroger API)",
+      "status": "mvp",
+      "potential_score": 6,
+      "missing_for_god_mode": [
+        "No tests",
+        "No CI/CD",
+        "Hardcoded Kroger API credentials pattern"
+      ],
+      "architect_recommendation": "Price hunting CLI + Streamlit UI. Solid for personal use. To productize: add price alert scheduling, historical tracking, and a notification system."
+    },
+    {
+      "name": "yr01-gateway",
+      "path": "/Users/stephengodman/yr01-gateway",
+      "stack": "Node.js/Express (SQLite, TTLock SDK, BLE)",
+      "status": "production",
+      "potential_score": 7,
+      "missing_for_god_mode": [
+        "No CI/CD pipeline (has test runner but no automation)",
+        "Deployed via systemd on Pi but no container"
+      ],
+      "architect_recommendation": "BLE smart lock gateway running on Pi5. Has tests and systemd service. Add Dockerfile and CI/CD for reproducible deploys."
+    },
+    {
+      "name": "yr01-console",
+      "path": "/Users/stephengodman/yr01-console",
+      "stack": "TypeScript/Next.js",
+      "status": "mvp",
+      "potential_score": 5,
+      "missing_for_god_mode": [
+        "No tests",
+        "No CI/CD",
+        "No README",
+        "Depends on yr01-gateway"
+      ],
+      "architect_recommendation": "Companion web UI for the lock gateway. Needs documentation and test coverage. Consider merging into a monorepo with yr01-gateway."
+    },
+    {
+      "name": "ulan-agent",
+      "path": "/Users/stephengodman/ulan-agent",
+      "stack": "Python (Hatch, pytest, zeroconf, SSDP)",
+      "status": "prototype",
+      "potential_score": 7,
+      "missing_for_god_mode": [
+        "No CI/CD",
+        "Alexa skill integration incomplete",
+        "Needs device control layer on top of discovery"
+      ],
+      "architect_recommendation": "Network device discovery agent — this is NotebookLM Category 3. Add actual device control (Yamaha YNCA, LG WebOS) on top of the scanner to complete the Universal Scanner vision."
+    },
+    {
+      "name": "clipboard-intelligence-mcp",
+      "path": "/Users/stephengodman/clipboard-intelligence-mcp",
+      "stack": "TypeScript (MCP SDK, better-sqlite3, vitest)",
+      "status": "production",
+      "potential_score": 6,
+      "missing_for_god_mode": ["No CI/CD", "No README"],
+      "architect_recommendation": "MCP server for clipboard history/intelligence. Well-structured with tests. Add README and publish to npm as a reusable MCP tool."
+    },
+    {
+      "name": "godmanautomations-website",
+      "path": "/Users/stephengodman/godmanautomations-website",
+      "stack": "Static HTML",
+      "status": "prototype",
+      "potential_score": 2,
+      "missing_for_god_mode": [
+        "Only has privacy/security/terms pages",
+        "No actual product or services content",
+        "No framework, no build system"
+      ],
+      "architect_recommendation": "This should be the public face of the entire operation. Rebuild with a real framework (Next.js or Astro), add capability pages for each project, case studies, and a contact form."
+    },
+    {
+      "name": "godman-lab",
+      "path": "Google Drive (iPhone backup)/godman-lab",
+      "stack": "Python (Docker, Streamlit, 25+ tools)",
+      "status": "mvp",
+      "potential_score": 8,
+      "missing_for_god_mode": [
+        "No CI/CD",
+        "No CLAUDE.md",
+        "Trapped in an iPhone backup — needs to be pulled into a proper git repo",
+        "15+ test files but no automation running them"
+      ],
+      "architect_recommendation": "This is a MONSTER. AI OS with plugin architecture, 25+ tools (email, OCR, tax, sheets, drive, vision), receipt processing, F250 diagnostics. Extract from backup, get it into GitHub, wire up CI. This could be the core of Godman Automations' backend platform."
+    },
+    {
+      "name": "nova-ai-studio",
+      "path": "Google Drive/Google AI Studio",
+      "stack": "Python (Flask, Groq, Gemini Vision, Twilio)",
+      "status": "prototype",
+      "potential_score": 5,
+      "missing_for_god_mode": [
+        "No tests",
+        "No CI/CD",
+        "No git repo",
+        "Living in Google Drive, not version controlled"
+      ],
+      "architect_recommendation": "AI assistant with memory, personas, and web browsing. Predecessor to the current Claude-based agent work. Evaluate what's worth salvaging vs. rebuilding on the Claude/Anthropic stack."
+    },
+    {
+      "name": "MAX AI (Pi5)",
+      "path": "pi5-ts:/home/max_ai/max",
+      "stack": "Python (FastAPI, Ollama, nginx, OliveTin)",
+      "status": "production",
+      "potential_score": 7,
+      "missing_for_god_mode": [
+        "No CI/CD (deployed manually)",
+        "No container (runs in venv with systemd)",
+        "Anti-hallucination guide exists but no automated testing"
+      ],
+      "architect_recommendation": "Running AI API server on Pi5 with 5 Ollama models, brain/personality/memory/tools architecture, nginx proxy, OliveTin admin panel. Dockerize it for reproducible deploys and add health check monitoring."
+    },
+    {
+      "name": "PriceBot Suite (Pi5)",
+      "path": "pi5-ts:/home/max_ai/salon-automation",
+      "stack": "Python (systemd services, Syncthing)",
+      "status": "mvp",
+      "potential_score": 8,
+      "missing_for_god_mode": [
+        "Services are inactive (DRY_RUN mode)",
+        "No tests",
+        "5 brand-specific services could be consolidated"
+      ],
+      "architect_recommendation": "Salon product price discovery for 5 brands (Color Wow, Davines, KM, Moroccanoil, Olaplex) with Square POS integration. This is a real business tool for your wife's salon. Activate from DRY_RUN, consolidate into one configurable service, add price change alerts."
+    },
+    {
+      "name": "open-webui-stack",
+      "path": "/Users/stephengodman/open-webui-stack",
+      "stack": "Docker Compose (Open WebUI, Ollama, MCP bridge)",
+      "status": "production",
+      "potential_score": 4,
+      "missing_for_god_mode": [
+        "Duplicate with openwebui-stack — consolidate",
+        "No documentation"
+      ],
+      "architect_recommendation": "Local LLM interface stack. Merge the two copies, document the setup, and consider connecting it to the Pi5 Ollama instance."
+    },
+    {
+      "name": "mcp (apify-mcp-server)",
+      "path": "/Users/stephengodman/mcp",
+      "stack": "Python (MCP)",
+      "status": "prototype",
+      "potential_score": 3,
+      "missing_for_god_mode": [
+        "Experimental/incomplete",
+        "No tests",
+        "No README"
+      ],
+      "architect_recommendation": "Experimental MCP server. Either develop fully or archive — don't leave skeletons around."
+    },
+    {
+      "name": "stephen-call-pack",
+      "path": "/Users/stephengodman/stephen-call-pack",
+      "stack": "Unknown",
+      "status": "prototype",
+      "potential_score": 1,
+      "missing_for_god_mode": ["README only — no code"],
+      "architect_recommendation": "Archive or delete. No code exists."
+    },
+    {
+      "name": "briefing-binder",
+      "path": "/Users/stephengodman/briefing-binder",
+      "stack": "N/A (documentation)",
+      "status": "prototype",
+      "potential_score": 2,
+      "missing_for_god_mode": ["README + inbox folder only"],
+      "architect_recommendation": "Documentation/notes project. Keep as reference but don't count as a software project."
+    }
+  ],
+  "summary": {
+    "total_projects": 17,
+    "production_ready": 4,
+    "mvp": 7,
+    "prototype": 6,
+    "avg_potential_score": 5.6,
+    "top_3_highest_potential": [
+      "ios-agent-runner (9)",
+      "godman-lab (8)",
+      "PriceBot Suite (8)"
+    ],
+    "biggest_gap": "CI/CD — only ralph-claude-code has it. Every other project ships manually.",
+    "biggest_opportunity": "godman-lab is trapped in an iPhone backup with 25+ tools, 15 tests, Docker support. Extract it to GitHub and it instantly becomes the most capable project in the portfolio.",
+    "immediate_actions": [
+      "Extract godman-lab from iPhone backup to GitHub",
+      "Add pytest + GitHub Actions to ios-agent-runner",
+      "Activate PriceBot from DRY_RUN for the salon",
+      "Rebuild godmanautomations.ai as a real capabilities showcase",
+      "Consolidate open-webui-stack duplicates"
+    ]
+  }
+}

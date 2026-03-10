@@ -118,6 +118,8 @@ def ios_run_goal(
     allow_tap_xy: bool = False,
     stop_after_step: int = 0,
     resume_run_id: str = "",
+    provider: str = "local_qwen",
+    allow_fallback: bool = True,
 ) -> str:
     """Run the autonomous agent loop with a plain-English goal.
 
@@ -132,6 +134,8 @@ def ios_run_goal(
         allow_tap_xy: Allow coordinate taps in safe mode (default: false).
         stop_after_step: Pause run after N steps (default: 0 disabled).
         resume_run_id: Resume an existing paused run ID (default: "").
+        provider: Model provider override ('local_qwen' or 'anthropic').
+        allow_fallback: If true and provider is local_qwen, try anthropic on failure.
 
     Returns:
         JSON string with keys: success, steps, summary, history.
@@ -146,6 +150,8 @@ def ios_run_goal(
         allow_tap_xy=allow_tap_xy,
         stop_after_step=(stop_after_step if stop_after_step > 0 else None),
         resume_run_id=(resume_run_id or None),
+        provider=provider,
+        allow_fallback=allow_fallback,
     )
     return json.dumps(result, indent=2)
 
@@ -237,6 +243,12 @@ def ios_runtime_health() -> str:
     return json.dumps({
         "python": sys.version.split()[0],
         "openai_key_set": bool(os.getenv("OPENAI_API_KEY")),
+        "local_provider": {
+            "configured": bool(os.getenv("QWEN_BASE_URL")),
+            "base_url": os.getenv("QWEN_BASE_URL", ""),
+            "model": os.getenv("QWEN_MODEL", ""),
+            "default_provider": os.getenv("AGENT_LOOP_PROVIDER", "local_qwen"),
+        },
         "features": {
             "vision_extract": {
                 "available": vision_ok,
