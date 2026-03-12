@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 import anthropic
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 
 from scripts import idbwrap, intel, run_report, run_state, screen_mapper, screenshot
 from scripts.safe_mode import SafeModePolicy
@@ -95,6 +95,8 @@ def _as_dict(value: object) -> dict[str, Any]:
         return value
     if isinstance(value, SimpleNamespace):
         return value.__dict__
+    if is_dataclass(value) and not isinstance(value, type):
+        return asdict(value)
     return {}
 
 
